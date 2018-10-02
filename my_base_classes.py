@@ -26,13 +26,16 @@ class Scale(object):
 
         sx = (self.max_x - self.min_x)
         sy = (self.max_y - self.min_y)
-
-        if np.array(data).ndim == 1:
+        ndim = data.ndim
+        if ndim == 1:
             data_copy[0] = data[0] * sx + self.min_x
             data_copy[1] = data[1] * sy + self.min_y
-        else:
+        elif ndim == 2:
             data_copy[:, 0] = data[:, 0] * sx + self.min_x
             data_copy[:, 1] = data[:, 1] * sy + self.min_y
+        elif ndim == 3:
+            data_copy[:, :, 0] = data[:, :, 0] * sx + self.min_x
+            data_copy[:, :, 1] = data[:, :, 1] * sy + self.min_y
 
         return data_copy
 
@@ -61,9 +64,9 @@ def load_seyfried(filename='/home/jamirian/workspace/crowd_sim/tests/sey01/sey01
             if ts % down_sample != 0:
                 continue
 
-            px = float(row[2])
-            py = float(row[3])
-            pz = float(row[4])
+            px = float(row[2])/100.
+            py = float(row[3])/100.
+            pz = float(row[4])/100.
             if id not in id_list:
                 id_list.append(id)
                 data_list.append(list())

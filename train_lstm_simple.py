@@ -1,8 +1,9 @@
 import sys
 import numpy as np
 from keras.models import Sequential
-from keras.layers import LSTM, Dense
+from keras.layers import LSTM, Dense, Reshape
 import pickle
+from keras.utils import plot_model
 from lstm_model.my_base_classes import Scale, to_supervised, load_seyfried, MyConfig
 import matplotlib.pyplot as plt
 
@@ -13,6 +14,7 @@ n_ped = len(data_arrays)
 train_size = int(n_ped * 0.67)
 test_size = n_ped - train_size
 
+# FIXME
 # with open('scale.pkl', 'wb') as scale_file:
 #     pickle.dump(scale, scale_file, pickle.HIGHEST_PROTOCOL)
 
@@ -52,7 +54,7 @@ train_Out = train_set[:, n_X:n_XIY]
 
 ## Reshape Train Data
 train_Inp = train_Inp.reshape((train_Inp.shape[0], n_past, 2))
-train_Out = train_Out.reshape((train_Inp.shape[0], n_next * 2))
+train_Out = train_Out.reshape((train_Inp.shape[0], n_next, 2))
 n_train = train_Inp.shape[0]
 
 print(train_set.shape)
@@ -60,16 +62,20 @@ print(train_Inp.shape)
 print(train_Out.shape)
 print(n_train)
 
+model_name = "models/model1"
+# TODO Try non-sequential LSTM
 model = Sequential()
 model.add(LSTM(100, input_shape=(n_past, 2), return_sequences=True))
 # model.add(LSTM(128, input_shape=(n_past, 2)))
 model.add(LSTM(50))
 # model.add(Dense(32))
 model.add(Dense(2 * n_next))
+model.add(Reshape((n_next, 2)))
 model.compile(loss='mean_squared_error', optimizer='adam')
-model.fit(train_Inp, train_Out, epochs=10, batch_size=n_train)
 
-model_name = "models/model3"
+plot_model(model, to_file=model_name+".png", show_shapes=True)
+model.fit(train_Inp, train_Out, validation_split=0.33, epochs=500, batch_size=256)
+
 # serialize model to JSON
 model_json = model.to_json()
 with open(model_name + ".json", "w+") as json_file:
