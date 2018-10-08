@@ -45,7 +45,7 @@ n_XIY = 2 * (n_past + n_next)
 
 train_set = np.array([], dtype=np.float).reshape(0, n_XIY)
 for ped in train:
-    train_seq_i = np.array(to_supervised(ped, n_past, n_next).values)
+    train_seq_i = np.array(to_supervised(ped, n_past, n_next))
     for i in range(train_seq_i.shape[0]):
         train_set = np.vstack((train_set, train_seq_i[i, :]))
 
@@ -62,19 +62,18 @@ print(train_Inp.shape)
 print(train_Out.shape)
 print(n_train)
 
-model_name = "models/model1"
-# TODO Try non-sequential LSTM
+model_name = "models/model2"
 model = Sequential()
-model.add(LSTM(100, input_shape=(n_past, 2), return_sequences=True))
-# model.add(LSTM(128, input_shape=(n_past, 2)))
-model.add(LSTM(50))
-# model.add(Dense(32))
+model.add(LSTM(64, input_shape=(n_past, 2)))
+# model.add(LSTM(100, input_shape=(n_past, 2), return_sequences=True))
+# model.add(LSTM(50))
+# model.add(Dense(24))
 model.add(Dense(2 * n_next))
 model.add(Reshape((n_next, 2)))
 model.compile(loss='mean_squared_error', optimizer='adam')
 
 plot_model(model, to_file=model_name+".png", show_shapes=True)
-model.fit(train_Inp, train_Out, validation_split=0.33, epochs=500, batch_size=256)
+history = model.fit(train_Inp, train_Out, validation_split=0.33, epochs=300, batch_size=256)
 
 # serialize model to JSON
 model_json = model.to_json()
@@ -83,3 +82,21 @@ with open(model_name + ".json", "w+") as json_file:
 # serialize weights to HDF5
 model.save_weights(model_name + ".h5")
 print("Saved model to file")
+
+# summarize history for accuracy
+# plt.plot(history.history['acc'])
+# plt.plot(history.history['val_acc'])
+# plt.title('model accuracy')
+# plt.ylabel('accuracy')
+# plt.xlabel('epoch')
+# plt.legend(['train', 'test'], loc='upper left')
+# plt.show()
+# summarize history for loss
+plt.plot(history.history['loss'])
+plt.plot(history.history['val_loss'])
+plt.title('model loss')
+plt.ylabel('loss')
+plt.xlabel('epoch')
+plt.legend(['train', 'test'], loc='upper left')
+plt.savefig(model_name + "_loss.png")
+plt.show()

@@ -57,7 +57,7 @@ n_XIY = 2 * (n_past + n_next)
 
 test_set = np.array([], dtype=np.float).reshape(0, n_XIY)
 for ped in test:
-    seq_i = np.array(to_supervised(ped, n_past, n_next).values)
+    seq_i = np.array(to_supervised(ped, n_past, n_next))
     for i in range(seq_i.shape[0]):
         test_set = np.vstack((test_set, seq_i[i, :]))
 n_test = test_set.shape[0]
