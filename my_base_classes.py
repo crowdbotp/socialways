@@ -9,6 +9,7 @@ class MyConfig:
     n_past = 8
     n_next = 12
 
+
 class ConstVelModel:
     def __init__(self, conf=MyConfig()):
         self.my_conf = conf
@@ -30,36 +31,49 @@ class ConstVelModel:
 
 
 class Scale(object):
+    '''
+    Given max and min of a rectangle it computes the scale and shift values to normalize data to [0,1]
+    '''
+
     def __init__(self):
         self.min_x = +math.inf
         self.max_x = -math.inf
         self.min_y = +math.inf
         self.max_y = -math.inf
+        self.sx, self.sy = 1, 1
+
+    # FIXME: sx and sy should be equal => ok
+    def calc_scale(self):
+        self.sx = 1 / (self.max_x - self.min_x)
+        self.sy = 1 / (self.max_y - self.min_y)
+        if self.sx > self.sy:
+            self.sy = self.sx
 
     def normalize(self, data, shift=True):
         if shift:
-            data[:, 0] = (data[:, 0] - self.min_x) / (self.max_x - self.min_x)
-            data[:, 1] = (data[:, 1] - self.min_y) / (self.max_y - self.min_y)
+            data[:, 0] = (data[:, 0] - self.min_x) * self.sx
+            data[:, 1] = (data[:, 1] - self.min_y) * self.sy
         else:
-            data[:, 0] = data[:, 0] / (self.max_x - self.min_x)
-            data[:, 1] = data[:, 1] / (self.max_y - self.min_y)
+            data[:, 0] = data[:, 0] * self.sx
+            data[:, 1] = data[:, 1] * self.sy
         return data
 
-    def denormalize(self, data, shift=True):
-        data_copy = np.copy(data)
+    def denormalize(self, data, shift=True, inPlace=False):
+        if inPlace:
+            data_copy = data
+        else:
+            data_copy = np.copy(data)
 
-        sx = (self.max_x - self.min_x)
-        sy = (self.max_y - self.min_y)
         ndim = data.ndim
         if ndim == 1:
-            data_copy[0] = data[0] * sx + self.min_x * shift
-            data_copy[1] = data[1] * sy + self.min_y * shift
+            data_copy[0] = data[0] / self.sx + self.min_x * shift
+            data_copy[1] = data[1] / self.sy + self.min_y * shift
         elif ndim == 2:
-            data_copy[:, 0] = data[:, 0] * sx + self.min_x * shift
-            data_copy[:, 1] = data[:, 1] * sy + self.min_y * shift
+            data_copy[:, 0] = data[:, 0] / self.sx + self.min_x * shift
+            data_copy[:, 1] = data[:, 1] / self.sy + self.min_y * shift
         elif ndim == 3:
-            data_copy[:, :, 0] = data[:, :, 0] * sx + self.min_x * shift
-            data_copy[:, :, 1] = data[:, :, 1] * sy + self.min_y * shift
+            data_copy[:, :, 0] = data[:, :, 0] / self.sx + self.min_x * shift
+            data_copy[:, :, 1] = data[:, :, 1] / self.sy + self.min_y * shift
 
         return data_copy
 
@@ -68,6 +82,12 @@ class Scale(object):
 # Few Header lines for Obstacles
 # id, timestamp, pos_x, pos_y, pos_z
 def load_seyfried(filename='/home/jamirian/workspace/crowd_sim/tests/sey_all/*.sey', down_sample=4):
+    '''
+    Loads datas of seyfried experiments
+    :param filename: dataset file with seyfried template
+    :param down_sample: To take just one sample every down_sample
+    :return:
+    '''
     pos_data_list = list()
     vel_data_list = list()
     time_data_list = list()
@@ -116,6 +136,8 @@ def load_seyfried(filename='/home/jamirian/workspace/crowd_sim/tests/sey_all/*.s
                 v = np.array([px - last_px, py - last_py]) * fps / (ts - last_t + np.finfo(float).eps)
                 vel_data_list[-1].append(v)
                 time_data_list[-1] = np.hstack((time_data_list[-1], np.array([ts])))
+
+                # FIXME: uncomment if you need instant velocity
                 #last_px = px
                 #last_py = py
                 #last_t = ts
@@ -133,15 +155,29 @@ def load_seyfried(filename='/home/jamirian/workspace/crowd_sim/tests/sey_all/*.s
         scale.max_y = max(scale.max_y, max(poss_i[:, 1]))
         p_data.append(poss_i)
 
-        # TODO: you can run a kalman filter/smoother on v_data
+        # TODO: you can run a Kalman filter/smoother on v_data
         v_data.append(vels_i)
+
+    scale.calc_scale()
 
     t_data = np.array(time_data_list)
 
+    # FIXME: Fix the order of variables to return
     return p_data, scale, t_data, v_data
 
 
 def to_supervised(data, n_in=1, n_out=1, diff_in=False, diff_out=True, drop_nan=True):
+    '''
+    Copy the data (an nD sequence) columns so that for each timestep you have a "in" seq and an "out" seq
+    :param data:
+    :param n_in: length of "in" seq (number of observations)
+    :param n_out: length of "out" seq (number of predictions)
+    :param diff_in: if True the "in" columns are differential otherwise will be absolute
+    :param diff_out: if True the "out" columns are differential otherwise will be absolute
+    :param drop_nan: if True eliminate the samples that contains nan (due to shift operation)
+    :return: a table whose columns are n_in * nD (observations) and then n_out * nD (predictions)
+    '''
+
     n_vars = 1 if type(data) is list else data.shape[1]
     df = DataFrame(data)
     cols, names = list(), list()
