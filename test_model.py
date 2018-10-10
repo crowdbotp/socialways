@@ -3,8 +3,8 @@ import numpy as np
 from keras.engine.saving import model_from_json
 import matplotlib.pyplot as plt
 from matplotlib.figure import figaspect
-from lstm_model.my_base_classes import Scale, MyConfig, ConstVelModel
-from lstm_model.my_base_classes import to_supervised, load_seyfried
+from lstm_model.utility import Scale, MyConfig, ConstVelModel
+from lstm_model.utility import to_supervised, load_seyfried
 from tabulate import tabulate
 
 # Load LSTM model

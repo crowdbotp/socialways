@@ -4,7 +4,7 @@ from keras.models import Sequential
 from keras.layers import LSTM, Dense, Reshape
 import pickle
 from keras.utils import plot_model
-from lstm_model.my_base_classes import Scale, to_supervised, load_seyfried, MyConfig
+from lstm_model.utility import Scale, to_supervised, load_seyfried, MyConfig
 import matplotlib.pyplot as plt
 
 np.random.seed(7)

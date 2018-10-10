@@ -3,7 +3,7 @@ from math import atan2, cos, sin, sqrt, exp
 from numpy import linalg
 from scipy import ndimage
 
-from lstm_model.my_base_classes import Scale, to_supervised, load_seyfried, MyConfig
+from lstm_model.utility import Scale, to_supervised, load_seyfried, MyConfig
 import numpy as np
 import matplotlib.pyplot as plt
 import imageio
