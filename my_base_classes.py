@@ -36,26 +36,30 @@ class Scale(object):
         self.min_y = +math.inf
         self.max_y = -math.inf
 
-    def normalize(self, data):
-        data[:, 0] = (data[:, 0] - self.min_x) / (self.max_x - self.min_x)
-        data[:, 1] = (data[:, 1] - self.min_y) / (self.max_y - self.min_y)
+    def normalize(self, data, shift=True):
+        if shift:
+            data[:, 0] = (data[:, 0] - self.min_x) / (self.max_x - self.min_x)
+            data[:, 1] = (data[:, 1] - self.min_y) / (self.max_y - self.min_y)
+        else:
+            data[:, 0] = data[:, 0] / (self.max_x - self.min_x)
+            data[:, 1] = data[:, 1] / (self.max_y - self.min_y)
         return data
 
-    def denormalize(self, data):
-        data_copy = data
+    def denormalize(self, data, shift=True):
+        data_copy = np.copy(data)
 
         sx = (self.max_x - self.min_x)
         sy = (self.max_y - self.min_y)
         ndim = data.ndim
         if ndim == 1:
-            data_copy[0] = data[0] * sx + self.min_x
-            data_copy[1] = data[1] * sy + self.min_y
+            data_copy[0] = data[0] * sx + self.min_x * shift
+            data_copy[1] = data[1] * sy + self.min_y * shift
         elif ndim == 2:
-            data_copy[:, 0] = data[:, 0] * sx + self.min_x
-            data_copy[:, 1] = data[:, 1] * sy + self.min_y
+            data_copy[:, 0] = data[:, 0] * sx + self.min_x * shift
+            data_copy[:, 1] = data[:, 1] * sy + self.min_y * shift
         elif ndim == 3:
-            data_copy[:, :, 0] = data[:, :, 0] * sx + self.min_x
-            data_copy[:, :, 1] = data[:, :, 1] * sy + self.min_y
+            data_copy[:, :, 0] = data[:, :, 0] * sx + self.min_x * shift
+            data_copy[:, :, 1] = data[:, :, 1] * sy + self.min_y * shift
 
         return data_copy
 
@@ -65,6 +69,7 @@ class Scale(object):
 # id, timestamp, pos_x, pos_y, pos_z
 def load_seyfried(filename='/home/jamirian/workspace/crowd_sim/tests/sey_all/*.sey', down_sample=4):
     pos_data_list = list()
+    vel_data_list = list()
     time_data_list = list()
 
     # check to search for many files?
@@ -86,13 +91,12 @@ def load_seyfried(filename='/home/jamirian/workspace/crowd_sim/tests/sey_all/*.s
             for row in csv_reader:
                 i += 1
                 if i == 4:
-                    fps = row[0]
+                    fps = float(row[0])
 
                 if len(row) != 5:
                     continue
 
                 id = row[0]
-                # print(row)
                 ts = float(row[1])
                 if ts % down_sample != 0:
                     continue
@@ -103,27 +107,38 @@ def load_seyfried(filename='/home/jamirian/workspace/crowd_sim/tests/sey_all/*.s
                 if id not in id_list:
                     id_list.append(id)
                     pos_data_list.append(list())
-                    time_data_list.append(np.empty((1,0)))
+                    vel_data_list.append(list())
+                    time_data_list.append(np.empty((0), dtype=int))
+                    last_px = px
+                    last_py = py
+                    last_t = ts
                 pos_data_list[-1].append(np.array([px, py]))
-                time_data_list[-1] =  np.hstack(time_data_list[-1], ts)
+                v = np.array([px - last_px, py - last_py]) * fps / (ts - last_t + np.finfo(float).eps)
+                vel_data_list[-1].append(v)
+                time_data_list[-1] = np.hstack((time_data_list[-1], np.array([ts])))
+                #last_px = px
+                #last_py = py
+                #last_t = ts
 
     p_data = list()
-    track_length_list = []
+    v_data = list()
 
     scale = Scale()
-    for d in pos_data_list:
-        len_i = len(d)
-        track_length_list.append(len_i)
-        ped_i = np.array(d)
-        scale.min_x = min(scale.min_x, min(ped_i[:, 0]))
-        scale.max_x = max(scale.max_x, max(ped_i[:, 0]))
-        scale.min_y = min(scale.min_y, min(ped_i[:, 1]))
-        scale.max_y = max(scale.max_y, max(ped_i[:, 1]))
-        p_data.append(ped_i)
+    for i in range(len(pos_data_list)):
+        poss_i = np.array(pos_data_list[i])
+        vels_i = np.array(vel_data_list[i])
+        scale.min_x = min(scale.min_x, min(poss_i[:, 0]))
+        scale.max_x = max(scale.max_x, max(poss_i[:, 0]))
+        scale.min_y = min(scale.min_y, min(poss_i[:, 1]))
+        scale.max_y = max(scale.max_y, max(poss_i[:, 1]))
+        p_data.append(poss_i)
+
+        # TODO: you can run a kalman filter/smoother on v_data
+        v_data.append(vels_i)
 
     t_data = np.array(time_data_list)
 
-    return p_data, scale, t_data
+    return p_data, scale, t_data, v_data
 
 
 def to_supervised(data, n_in=1, n_out=1, diff_in=False, diff_out=True, drop_nan=True):
