@@ -1,4 +1,3 @@
-import pickle
 import numpy as np
 from keras.engine.saving import model_from_json
 import matplotlib.pyplot as plt
@@ -44,16 +43,6 @@ n_next = MyConfig().n_next
 n_X, n_Y = 2 * n_past, 2 * n_next
 n_XIY = 2 * (n_past + n_next)
 
-
-# TODO Define Prediction Error
-# train_set = np.array([], dtype=np.float).reshape(0, n_XIY)
-# for ped in train:
-#     seq_i = np.array(to_supervised(ped, n_past, n_next).values)
-#     for i in range(seq_i.shape[0]):
-#         train_set = np.vstack((train_set, seq_i[i, :]))
-# n_train = train_set.shape[0]
-# train_inp = train_set[:, 0:n_X].reshape((n_train, n_past, 2))
-# train_out = train_set[:, n_X:n_XIY].reshape((n_train, n_next, 2))
 
 test_set = np.array([], dtype=np.float).reshape(0, n_XIY)
 for ped in test:
@@ -117,8 +106,6 @@ for i in range(len(test)):
     print(gt_inp.shape)
 
     lstm_prediction = lstm_model.predict(gt_inp)
-    #lstm_prediction = np.reshape(lstm_prediction, (num_ped_samples, n_next, 2))
-
     gt_out = np.reshape(gt_out, (num_ped_samples, n_next, 2))
 
     w, h = figaspect(4 / 1)
