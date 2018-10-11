@@ -1,92 +1,93 @@
 from math import atan2, cos, sin, sqrt, exp
-
-from numpy import linalg
 from scipy import ndimage
-
-from lstm_model.utility import Scale, to_supervised, load_seyfried, MyConfig
+from lstm_model.utility import Scale, to_supervised, MyConfig, SeyfriedParser
 import numpy as np
+from numpy import linalg as LA
 import matplotlib.pyplot as plt
 import imageio
 
 
 np.random.seed(7)
-p_data, scale, t_data, v_data = load_seyfried('/home/jamirian/workspace/crowd_sim/tests/sey01/sey01.sey')
+eps = np.finfo(float).eps
+PIX_SCALE = 100
+grid_size = [37, 37]
+cnt = np.floor([grid_size[0] / 2, grid_size[1] / 2]).astype(int)
+
+parser = SeyfriedParser()
+pos_data, vel_data, time_data = parser.load('/home/jamirian/workspace/crowd_sim/tests/sey01/sey01.sey')
+scale = parser.scale
 print(scale.min_y, scale.max_y)
 
-for i in range(len(p_data)):
-    p_data[i] = scale.normalize(p_data[i])
-    v_data[i] = scale.normalize(v_data[i], False)
-data_set = np.array(p_data)
 
-grid_size = [37, 37]
-center = np.floor([grid_size[0] / 2, grid_size[1] / 2]).astype(int)
+for i in range(len(pos_data)):
+    pos_data[i] = scale.normalize(pos_data[i])
+    vel_data[i] = scale.normalize(vel_data[i], False)
+data_set = np.array(pos_data)
 
-for i in range(25, len(p_data)):
+
+for i in range(0, len(pos_data)):
+
+    # To export GIFs that depicts the sequence of perception of the agent
     gif_writer = imageio.get_writer("../outputs/RISK_%d.gif" % i, mode='I')
-    fig = plt.gcf()
-    fig.set_size_inches(14, 5)
-    fig.canvas.set_window_title('Seyfried 01 - Ped %d' % i)
 
-    ped_pos = p_data[i]
-    ped_vel = v_data[i]
-    my_pos_0 = ped_pos[0]
-    my_goal = ped_pos[-1]
-    # print('my_pos = ', scale.denormalize(my_pos_0))
-    # print('my_goal = ', scale.denormalize(my_gol))
-    print('I want to build the occu map for ped %d' % i)
-    for t_ind in range(t_data[i].shape[0]):
-        t = t_data[i][t_ind]
-        my_cur_loc = ped_pos[t_ind]
-        my_cur_vel = ped_vel[t_ind]
+    ped_i_poss = pos_data[i]
+    ped_i_vels = vel_data[i]
+    my_pos_0 = ped_i_poss[0]
+    my_goal = ped_i_poss[-1]
+    print("Building the occupancy map for ped %d : \n" % i)
+    for t_index in range(time_data[i].shape[0]):
+        t = time_data[i][t_index]
+        my_cur_loc = ped_i_poss[t_index]
+        my_cur_vel = ped_i_vels[t_index]
 
-        # Create Images
-        cart_grid = np.zeros((grid_size[0], grid_size[1], 3), dtype="uint8")
-        cart_grid[center[0], center[1], 1] = 250
+        # Creating the Grids (Centered on the agent)
+        cartesian_grid = np.zeros((grid_size[0], grid_size[1], 3), dtype="uint8")
+        cartesian_grid[cnt[0], cnt[1], 1] = 250
 
-        rot_cart_grid = np.zeros((grid_size[0], grid_size[1], 3), dtype="uint8")
-        rot_cart_grid[center[0], center[1], 1] = 250
-        # polar image
-        polar_grid = np.zeros((grid_size[0], grid_size[1], 3), dtype="uint8")
-        polar_grid[0, center[1], 1] = 250
+        # The Cartesian grid which is rotated and aligned to the heading of agent
+        aligned_cartesian_grid = np.zeros((grid_size[0], grid_size[1], 3), dtype="uint8")
+        aligned_cartesian_grid[cnt[0], cnt[1], 1] = 250
 
-        others_locs = np.empty((0, 2))
-        others_vels = np.empty((0, 2))
-        for j in range(len(p_data)):
+        # Polar Grid
+        aligned_polar_grid = np.zeros((grid_size[0], grid_size[1], 3), dtype="uint8")
+        aligned_polar_grid[0, cnt[1], 1] = 250
+
+        neighbor_locs = np.empty((0, 2))
+        neighbor_vels = np.empty((0, 2))
+        for j in range(len(pos_data)):
             if j == i:
                 continue
-            t_ind = np.where(t_data[j] == t)
-            t_ind = np.array(t_ind)
-            # if t_data[j][0] <= t and t_data[j][-1] >= t:
-            if t_ind.size:
-                t_ind = t_ind[-1]
-                others_locs = np.vstack((others_locs, p_data[j][t_ind]))
-                others_vels = np.vstack((others_vels, v_data[j][t_ind]))
-                # print('ped %d is also present at frame %d' % (j, t))
-        if not others_locs.size:
+
+            t_index_j = np.array(np.where(time_data[j] == t))
+            if t_index_j.size:
+                neighbor_locs = np.vstack((neighbor_locs, pos_data[j][t_index_j[-1]]))
+                neighbor_vels = np.vstack((neighbor_vels, vel_data[j][t_index_j[-1]]))
+
+        if not neighbor_locs.size:
             continue
 
         # print('#######################################')
         # print('my cur pos = ', scale.denormalize(my_cur_loc) * 100)
         # print("others pos = \n", scale.denormalize(others_locs) * 100)
-        # print("others vel = \n", scale.denormalize(others_vels) * 100)
+        # print("others vel = \n", scale.denormalize(others_vels, False) * 100)
 
-        relative_locs = others_locs - my_cur_loc
-        relative_vels = others_vels - my_cur_vel
+        relative_locs = neighbor_locs - my_cur_loc
+        relative_vels = neighbor_vels - my_cur_vel
         TTCAs = np.empty((0, 1))
         DCAs = np.empty((0, 1))
         RISKs = np.empty((0, 1))
         for j in range(relative_locs.shape[0]):
-            ttca_j = - np.dot(relative_locs[j, :], relative_vels[j, :]) \
-                     / (linalg.norm(relative_vels[j, :]) + np.finfo(float).eps)
-            ttca_j = max(ttca_j, 0)
-            dca_j = exp(-linalg.norm(ttca_j * relative_vels[j, :] + relative_locs[j, :]) / 0.40)
-            _dpn__ = relative_locs[j, :] / (linalg.norm(relative_locs[j, :]) + np.finfo(float).eps)
-            _vjn__ = others_vels[j, :] / (linalg.norm(others_vels[j, :]+ np.finfo(float).eps))
-            risk_j = 0.5 - 0.5 * np.dot(_dpn__, _vjn__)
+            _ttca_j = - np.dot(relative_locs[j], relative_vels[j]) / (LA.norm(relative_vels[j]) + eps)
+            _ttca_j = max(_ttca_j, 0)
+            _dca_j = exp(-LA.norm(_ttca_j * relative_vels[j] + relative_locs[j]) / 0.40)
+            _dpn = relative_locs[j] / (LA.norm(relative_locs[j]) + eps)
+            _vjn = neighbor_vels[j] / (LA.norm(neighbor_vels[j] + eps))
+            _risk_j = 0.5 - 0.5 * np.dot(_dpn, _vjn)
 
-            TTCAs = np.vstack((TTCAs, ttca_j))
-            DCAs = np.vstack((DCAs, dca_j))
-            RISKs = np.vstack((RISKs, risk_j))
+            TTCAs = np.append(TTCAs, _ttca_j)
+            DCAs = np.append(DCAs, _dca_j)
+            RISKs = np.append(RISKs, _risk_j)
+
         # print("DPs = \n", relative_locs)
         # print("DVs = \n", relative_vels)
         # print("TTCAs = \n", TTCAs)
@@ -98,70 +99,67 @@ for i in range(25, len(p_data)):
         theta = -goal_ang
         rotation_mat = [[cos(theta), sin(-theta)], [sin(theta), cos(theta)]]
 
-        # Display Goal
         # print("goal_vec = ", goal_vec)
         # print("goal_ang = ", goal_ang * 180 / np.pi)
         # print("rot_mat = ", rotation_mat)
 
-        cart_grid[int(round(goal_vec[0] * grid_size[0] / 2 + center[0])),
-                  int(round(goal_vec[1] * grid_size[1] / 2 + center[1])), 2] = 250
+        cartesian_grid[int(round(goal_vec[0] * grid_size[0] / 2 + cnt[0])),
+                       int(round(goal_vec[1] * grid_size[1] / 2 + cnt[1])), 2] = 255
+
         rot_goal = np.matmul(rotation_mat, goal_vec)
         if abs(rot_goal[0]) >= 1:
             rot_goal = rot_goal / rot_goal[0]
-        rot_cart_grid[int(round(rot_goal[0] * grid_size[0] / 2 + center[0])),
-                      int(round(rot_goal[1] * grid_size[1] / 2 + center[1])), 2] = 250
+        aligned_cartesian_grid[int(round(rot_goal[0] * grid_size[0] / 2 + cnt[0])),
+                               int(round(rot_goal[1] * grid_size[1] / 2 + cnt[1])), 2] = 255
 
-        goal_rad = linalg.norm(rot_goal)
+        goal_rad = LA.norm(rot_goal)
         goal_ang = atan2(rot_goal[1], rot_goal[0])
-        polar_grid[int(round(goal_rad * grid_size[0] / sqrt(2))),
-                   int(round(goal_ang * grid_size[1] / (2 * np.pi) + center[1])), 2] = 250
+        aligned_polar_grid[int(round(goal_rad * grid_size[0] / sqrt(2))),
+                           int(round(goal_ang * grid_size[1] / (2 * np.pi) + cnt[1])), 2] = 255
 
         for j in range(relative_locs.shape[0]):
-            loc_j = relative_locs[j]
-            cart_grid[int(round(loc_j[0] * grid_size[0] / 2 + center[0])),
-                      int(round(loc_j[1] * grid_size[0] / 2 + center[1])), 0] += RISKs[j]*100
+            cartesian_grid[int(round(relative_locs[j][0] * grid_size[0] / 2 + cnt[0])),
+                           int(round(relative_locs[j][1] * grid_size[0] / 2 + cnt[1])), 0] += RISKs[j] * PIX_SCALE
+
             # Rotate
-            rotated_loc_i = np.matmul(rotation_mat, loc_j)
-            rot_x = rotated_loc_i[0]
-            rot_y = rotated_loc_i[1]
+            [rot_x, rot_y] = np.matmul(rotation_mat, relative_locs[j])
             r = sqrt(rot_x ** 2 + rot_y ** 2)
             th = atan2(rot_y, rot_x)
-            polar_loc = np.array([r, th])
+            #polar_loc = np.array([r, th])
 
-            rot_x_coord = int(round(rot_x * grid_size[0] / 2 + center[0]))
-            rot_y_coord = int(round(rot_y * grid_size[1] / 2 + center[1]))
-            # rot_cart_grid[rot_x_coord, rot_y_coord, 0] += 80
-            rot_cart_grid[rot_x_coord, rot_y_coord, 0] += RISKs[j]*100
+            rot_x_coord = int(round(rot_x * grid_size[0] / 2 + cnt[0]))
+            rot_y_coord = int(round(rot_y * grid_size[1] / 2 + cnt[1]))
+            aligned_cartesian_grid[rot_x_coord, rot_y_coord, 0] += RISKs[j] * PIX_SCALE
 
             r_coord = int(round(r * grid_size[0] / sqrt(2)))
-            th_coord = int(round(th * grid_size[1] / (2 * np.pi) + center[1]))
-            # print("polar coordinate = ", r_coord, th_coord)
-            # polar_grid[r_coord, th_coord, 0] += 80
-            polar_grid[r_coord, th_coord, 0] += RISKs[j]*100
+            th_coord = int(round(th * grid_size[1] / (2 * np.pi) + cnt[1]))
+            aligned_polar_grid[r_coord, th_coord, 0] += RISKs[j] * PIX_SCALE
 
-        # Rotate images
-        cart_grid = ndimage.rotate(cart_grid, 90)
-        rot_cart_grid = ndimage.rotate(rot_cart_grid, 90)
-        polar_grid = ndimage.rotate(polar_grid, 90)
+        # Rotate images to display
+        cartesian_grid = ndimage.rotate(cartesian_grid, 90)
+        aligned_cartesian_grid = ndimage.rotate(aligned_cartesian_grid, 90)
+        aligned_polar_grid = ndimage.rotate(aligned_polar_grid, 90)
 
+        fig = plt.gcf()
+        fig.canvas.set_window_title('Seyfried - Ped %d' % i)
+        fig.set_size_inches(14, 5)
         plt.subplot(1, 3, 1)
         plt.xlabel('x')
         plt.ylabel('y')
-        # plt.grid(True)
         plt.title('Centered on Agent')
-        plt.imshow(cart_grid)
+        plt.imshow(cartesian_grid)
         plt.text(-1, -5, 'Seyfried - Ped %d Frame = %d' % (i, t))
         plt.subplot(1, 3, 2)
         plt.xlabel('agent_x')
         plt.ylabel('agent_y')
         plt.title('Aligned to Agent Orien')
-        plt.imshow(rot_cart_grid)
+        plt.imshow(aligned_cartesian_grid)
         plt.subplot(1, 3, 3)
         plt.xlabel('radius')
         plt.ylabel('angle')
         plt.title('In Polar Coord')
-        plt.imshow(polar_grid)
-        # plt.show()
+        plt.imshow(aligned_polar_grid)
+        plt.show()
         plt.savefig('../outputs/tmp.png')
         gif_writer.append_data(imageio.imread('../outputs/tmp.png'))
 

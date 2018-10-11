@@ -1,20 +1,21 @@
 import pickle
 import numpy as np
-from astropy.wcs.docstrings import mix
 from keras.engine.saving import model_from_json
 import matplotlib.pyplot as plt
 from matplotlib.figure import figaspect
 from lstm_model.utility import Scale, MyConfig, ConstVelModel
-from lstm_model.utility import to_supervised, load_seyfried
+from lstm_model.utility import to_supervised, SeyfriedParser
 from tabulate import tabulate
 
 np.random.seed(7)
-data_arrays, scale = load_seyfried()
-np.random.shuffle(data_arrays)
-n_ped = len(data_arrays)
+parser = SeyfriedParser()
+pos_data, vel_data, time_data = parser.load('/home/jamirian/workspace/crowd_sim/tests/sey01/sey01.sey')
+scale = parser.scale
+np.random.shuffle(pos_data)
+n_ped = len(pos_data)
 
 # Load LSTM model
-model_name = "models/mixer_model_3"
+model_name = "models/mixer_model_2"
 json_file = open(model_name + ".json", 'r')
 loaded_model_json = json_file.read()
 json_file.close()
@@ -29,9 +30,9 @@ cv_model = ConstVelModel()
 
 
 # Normalize Data between [0,1]
-for i in range(len(data_arrays)):
-    data_arrays[i] = scale.normalize(data_arrays[i])
-data_set = np.array(data_arrays)
+for i in range(len(pos_data)):
+    pos_data[i] = scale.normalize(pos_data[i])
+data_set = np.array(pos_data)
 
 # Convert Time-series to supervised learning format
 n_past = MyConfig().n_past

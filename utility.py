@@ -42,11 +42,13 @@ class Scale(object):
         self.max_y = -math.inf
         self.sx, self.sy = 1, 1
 
-    # FIXME: sx and sy should be equal => ok
     def calc_scale(self):
         self.sx = 1 / (self.max_x - self.min_x)
         self.sy = 1 / (self.max_y - self.min_y)
+        # FIXME: sx and sy should be equal => ok
         if self.sx > self.sy:
+            self.sx = self.sy
+        else:
             self.sy = self.sx
 
     def normalize(self, data, shift=True):
@@ -78,97 +80,103 @@ class Scale(object):
         return data_copy
 
 
-# seyfried rows are like this:
-# Few Header lines for Obstacles
-# id, timestamp, pos_x, pos_y, pos_z
-def load_seyfried(filename='/home/jamirian/workspace/crowd_sim/tests/sey_all/*.sey', down_sample=4):
-    '''
-    Loads datas of seyfried experiments
-    :param filename: dataset file with seyfried template
-    :param down_sample: To take just one sample every down_sample
-    :return:
-    '''
-    pos_data_list = list()
-    vel_data_list = list()
-    time_data_list = list()
+class SeyfriedParser:
+    def __init__(self):
+        self.scale = Scale()
 
-    # check to search for many files?
-    file_names = list()
-    if '*' in filename:
-        files_path = filename[:filename.index('*')]
-        extension = filename[filename.index('*')+1:]
-        for file in os.listdir(files_path):
-            if file.endswith(extension):
-                file_names.append(files_path+file)
-    else:
-        file_names.append(filename)
+    def load(self, filename, down_sample=4):
+        '''
+        Loads datas of seyfried experiments
+        * seyfried template:
+        >> n_Obstacles
+        >> x1[i] y1[i] x2[i] y2[i] x(n_Obstacles)
+        >> fps
+        >> id, timestamp, pos_x, pos_y, pos_z
+        >> ...
+        :param filename: dataset file with seyfried template
+        :param down_sample: To take just one sample every down_sample
+        :return:
+        '''
+        pos_data_list = list()
+        vel_data_list = list()
+        time_data_list = list()
 
-    for file in file_names:
-        with open(file, 'r') as data_file:
-            csv_reader = csv.reader(data_file, delimiter=' ')
-            id_list = list()
-            i = 0
-            for row in csv_reader:
-                i += 1
-                if i == 4:
-                    fps = float(row[0])
+        # check to search for many files?
+        file_names = list()
+        if '*' in filename:
+            files_path = filename[:filename.index('*')]
+            extension = filename[filename.index('*')+1:]
+            for file in os.listdir(files_path):
+                if file.endswith(extension):
+                    file_names.append(files_path+file)
+        else:
+            file_names.append(filename)
 
-                if len(row) != 5:
-                    continue
+        for file in file_names:
+            with open(file, 'r') as data_file:
+                csv_reader = csv.reader(data_file, delimiter=' ')
+                id_list = list()
+                i = 0
+                for row in csv_reader:
+                    i += 1
+                    if i == 4:
+                        fps = float(row[0])
 
-                id = row[0]
-                ts = float(row[1])
-                if ts % down_sample != 0:
-                    continue
+                    if len(row) != 5:
+                        continue
 
-                px = float(row[2])/100.
-                py = float(row[3])/100.
-                pz = float(row[4])/100.
-                if id not in id_list:
-                    id_list.append(id)
-                    pos_data_list.append(list())
-                    vel_data_list.append(list())
-                    time_data_list.append(np.empty((0), dtype=int))
-                    last_px = px
-                    last_py = py
-                    last_t = ts
-                pos_data_list[-1].append(np.array([px, py]))
-                v = np.array([px - last_px, py - last_py]) * fps / (ts - last_t + np.finfo(float).eps)
-                vel_data_list[-1].append(v)
-                time_data_list[-1] = np.hstack((time_data_list[-1], np.array([ts])))
+                    id = row[0]
+                    ts = float(row[1])
+                    if ts % down_sample != 0:
+                        continue
 
-                # FIXME: uncomment if you need instant velocity
-                #last_px = px
-                #last_py = py
-                #last_t = ts
+                    px = float(row[2])/100.
+                    py = float(row[3])/100.
+                    pz = float(row[4])/100.
+                    if id not in id_list:
+                        id_list.append(id)
+                        pos_data_list.append(list())
+                        vel_data_list.append(list())
+                        time_data_list.append(np.empty((0), dtype=int))
+                        last_px = px
+                        last_py = py
+                        last_t = ts
+                    pos_data_list[-1].append(np.array([px, py]))
+                    v = np.array([px - last_px, py - last_py]) * fps / (ts - last_t + np.finfo(float).eps)
+                    vel_data_list[-1].append(v)
+                    time_data_list[-1] = np.hstack((time_data_list[-1], np.array([ts])))
 
-    p_data = list()
-    v_data = list()
+                    # FIXME: uncomment if you need instant velocity
+                    #last_px = px
+                    #last_py = py
+                    #last_t = ts
 
-    scale = Scale()
-    for i in range(len(pos_data_list)):
-        poss_i = np.array(pos_data_list[i])
-        vels_i = np.array(vel_data_list[i])
-        scale.min_x = min(scale.min_x, min(poss_i[:, 0]))
-        scale.max_x = max(scale.max_x, max(poss_i[:, 0]))
-        scale.min_y = min(scale.min_y, min(poss_i[:, 1]))
-        scale.max_y = max(scale.max_y, max(poss_i[:, 1]))
-        p_data.append(poss_i)
+        p_data = list()
+        v_data = list()
 
-        # TODO: you can run a Kalman filter/smoother on v_data
-        v_data.append(vels_i)
+        for i in range(len(pos_data_list)):
+            poss_i = np.array(pos_data_list[i])
+            p_data.append(poss_i)
+            # TODO: you can apply a Kalman filter/smoother on v_data
+            vels_i = np.array(vel_data_list[i])
+            v_data.append(vels_i)
+        t_data = np.array(time_data_list)
 
-    scale.calc_scale()
+        for i in range(len(pos_data_list)):
+            poss_i = np.array(pos_data_list[i])
+            self.scale.min_x = min(self.scale.min_x, min(poss_i[:, 0]))
+            self.scale.max_x = max(self.scale.max_x, max(poss_i[:, 0]))
+            self.scale.min_y = min(self.scale.min_y, min(poss_i[:, 1]))
+            self.scale.max_y = max(self.scale.max_y, max(poss_i[:, 1]))
+        self.scale.calc_scale()
 
-    t_data = np.array(time_data_list)
-
-    # FIXME: Fix the order of variables to return
-    return p_data, scale, t_data, v_data
+        return p_data, v_data, t_data
 
 
 def to_supervised(data, n_in=1, n_out=1, diff_in=False, diff_out=True, drop_nan=True):
     '''
-    Copy the data (an nD sequence) columns so that for each timestep you have a "in" seq and an "out" seq
+    @CopyRight: Code is inspired by weblog of machinelearningmastery.com
+    Copies the data columns (of an nD sequence) so that for each timestep you have a "in" seq and an "out" seq
     :param data:
     :param n_in: length of "in" seq (number of observations)
     :param n_out: length of "out" seq (number of predictions)

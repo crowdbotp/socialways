@@ -4,24 +4,25 @@ from keras.models import Sequential
 from keras.layers import LSTM, Dense, Reshape
 import pickle
 from keras.utils import plot_model
-from lstm_model.utility import Scale, to_supervised, load_seyfried, MyConfig
+from lstm_model.utility import Scale, to_supervised, MyConfig, SeyfriedParser
 import matplotlib.pyplot as plt
 
 np.random.seed(7)
-data_arrays, scale = load_seyfried()
-n_ped = len(data_arrays)
-
+parser = SeyfriedParser()
+pos_data, vel_data, time_data = parser.load('/home/jamirian/workspace/crowd_sim/tests/sey01/sey01.sey')
+n_ped = len(pos_data)
 train_size = int(n_ped * 0.67)
 test_size = n_ped - train_size
+scale = parser.scale
 
 # FIXME
 # with open('scale.pkl', 'wb') as scale_file:
 #     pickle.dump(scale, scale_file, pickle.HIGHEST_PROTOCOL)
 
 # Normalize Data between [0,1]
-for i in range(len(data_arrays)):
-    data_arrays[i] = scale.normalize(data_arrays[i])
-data_set = np.array(data_arrays)
+for i in range(len(pos_data)):
+    pos_data[i] = scale.normalize(pos_data[i])
+data_set = np.array(pos_data)
 train, test = data_set[0:train_size], data_set[train_size + 1:len(data_set)]
 
 ## Edge Padding
@@ -62,7 +63,7 @@ print(train_Inp.shape)
 print(train_Out.shape)
 print(n_train)
 
-model_name = "models/model2"
+model_name = "models/model_test"
 model = Sequential()
 model.add(LSTM(64, input_shape=(n_past, 2)))
 # model.add(LSTM(100, input_shape=(n_past, 2), return_sequences=True))
@@ -75,22 +76,14 @@ model.compile(loss='mean_squared_error', optimizer='adam')
 plot_model(model, to_file=model_name+".png", show_shapes=True)
 history = model.fit(train_Inp, train_Out, validation_split=0.33, epochs=300, batch_size=256)
 
-# serialize model to JSON
+# save model and weights
 model_json = model.to_json()
 with open(model_name + ".json", "w+") as json_file:
     json_file.write(model_json)
-# serialize weights to HDF5
 model.save_weights(model_name + ".h5")
 print("Saved model to file")
 
-# summarize history for accuracy
-# plt.plot(history.history['acc'])
-# plt.plot(history.history['val_acc'])
-# plt.title('model accuracy')
-# plt.ylabel('accuracy')
-# plt.xlabel('epoch')
-# plt.legend(['train', 'test'], loc='upper left')
-# plt.show()
+
 # summarize history for loss
 plt.plot(history.history['loss'])
 plt.plot(history.history['val_loss'])

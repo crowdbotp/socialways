@@ -2,8 +2,8 @@ import numpy as np
 from keras.engine.saving import model_from_json
 import matplotlib.pyplot as plt
 from matplotlib.figure import figaspect
-from lstm_model.utility import Scale, MyConfig, ConstVelModel
-from lstm_model.utility import to_supervised, load_seyfried
+from lstm_model.utility import Scale, MyConfig, ConstVelModel, SeyfriedParser
+from lstm_model.utility import to_supervised, load
 from tabulate import tabulate
 
 # Load LSTM model
@@ -12,7 +12,6 @@ json_file = open(model_name + ".json", 'r')
 loaded_model_json = json_file.read()
 json_file.close()
 lstm_model = model_from_json(loaded_model_json)
-# load weights into new model
 lstm_model.load_weights(model_name + ".h5")
 print("Loaded model from file")
 
@@ -20,8 +19,10 @@ print("Loaded model from file")
 cv_model = ConstVelModel()
 
 np.random.seed(7)
-data_arrays, scale = load_seyfried()
-n_ped = len(data_arrays)
+parser = SeyfriedParser()
+pos_data, vel_data, time_data = parser.load('/home/jamirian/workspace/crowd_sim/tests/sey01/sey01.sey')
+scale = parser.scale
+n_ped = len(pos_data)
 
 train_size = int(n_ped * 0.67)
 test_size = n_ped - train_size
@@ -30,9 +31,9 @@ test_size = n_ped - train_size
 #     pickle.dump(scale, scale_file, pickle.HIGHEST_PROTOCOL)
 
 # Normalize Data between [0,1]
-for i in range(len(data_arrays)):
-    data_arrays[i] = scale.normalize(data_arrays[i])
-data_set = np.array(data_arrays)
+for i in range(len(pos_data)):
+    pos_data[i] = scale.normalize(pos_data[i])
+data_set = np.array(pos_data)
 
 train = data_set[0:train_size]
 test = data_set[train_size + 1:len(data_set)]
@@ -95,8 +96,9 @@ print('Results on Test set of Seyfried1:')
 print('***********************************')
 print(tabulate([['Lstm', lstm_ade, lstm_fde], ['cv', cv_ade, cv_fde]],
                headers=['Method', 'ADE Error', 'FDE Error']))
-exit(1)
 
+# Plot Results
+exit(1)
 
 for i in range(len(test)):
     ped_i = np.array(to_supervised(test[i], n_past, n_next).values)

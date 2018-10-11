@@ -2,22 +2,23 @@ import sys
 import numpy as np
 from keras import Model
 from keras.callbacks import ModelCheckpoint
-from keras.models import Sequential
 from keras.layers import LSTM, Dense, Reshape, Input, concatenate, Conv2D, Flatten, Dropout, SimpleRNN
 from keras.utils import plot_model
-from lstm_model.utility import Scale, to_supervised, load_seyfried, MyConfig
+from lstm_model.utility import Scale, to_supervised, MyConfig, SeyfriedParser
 import matplotlib.pyplot as plt
 import pickle
 
 np.random.seed(7)
-data_arrays, scale = load_seyfried()
-np.random.shuffle(data_arrays)
-n_ped = len(data_arrays)
+parser = SeyfriedParser()
+pos_data, vel_data, time_data = parser.load('/home/jamirian/workspace/crowd_sim/tests/sey01/sey01.sey')
+scale = parser.scale
+np.random.shuffle(pos_data)
+n_ped = len(pos_data)
 
 # Normalize Data between [0,1]
-for i in range(len(data_arrays)):
-    data_arrays[i] = scale.normalize(data_arrays[i])
-data_set = np.array(data_arrays)
+for i in range(len(pos_data)):
+    pos_data[i] = scale.normalize(pos_data[i])
+data_set = np.array(pos_data)
 
 # Convert Time-series to supervised learning format
 n_past = MyConfig().n_past
@@ -57,12 +58,12 @@ model_name = "models/mixer_model_3"
 pos_inputs = Input(shape=(n_past, 2), name='position_input')
 vel_inputs = Input(shape=(n_past - 1, 2), name='velocity_input')
 
-pos_lstm_out = LSTM(128, name='position_encoder', return_sequences=True)(pos_inputs)
+pos_lstm_out = LSTM(128, name='position_encoder', return_sequences=False)(pos_inputs)
 pos_dense = Dense(128, activation='relu')(pos_lstm_out)
 # pos_dense = Dense(128, activation='tanh')(pos_dense)
 # pos_dense = Dropout(0.99)(pos_dense)
 
-vel_lstm_out = LSTM(128, name='velocity_encoder', return_sequences=True)(vel_inputs)
+vel_lstm_out = LSTM(128, name='velocity_encoder', return_sequences=False)(vel_inputs)
 vel_dense = Dense(128, activation='relu')(vel_lstm_out)
 # vel_dense = Dense(128, activation='tanh')(vel_dense)
 
@@ -78,8 +79,8 @@ model = Model(inputs=[pos_inputs, vel_inputs], outputs=reshape_out)
 model.compile(loss='mean_squared_error', optimizer='adam', metrics=['mae'])
 plot_model(model, to_file=model_name+".png", show_shapes=True)
 
-filepath = model_name + "-best-weights.hdf5"
-checkpoint = ModelCheckpoint(filepath, monitor='val_loss', verbose=1, save_best_only=True, mode='min')
+best_weights = model_name + "-best-weights.hdf5"
+checkpoint = ModelCheckpoint(best_weights, monitor='val_loss', verbose=1, save_best_only=True, mode='min')
 callbacks_list = [checkpoint]
 
 history = model.fit([train_in_pos, train_in_vel], train_out, validation_split=0.33,
