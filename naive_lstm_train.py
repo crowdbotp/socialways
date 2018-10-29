@@ -4,12 +4,16 @@ from keras.models import Sequential
 from keras.layers import LSTM, Dense, Reshape
 import pickle
 from keras.utils import plot_model
-from lstm_model.utility import Scale, to_supervised, MyConfig, SeyfriedParser
+from lstm_model.utility import Scale, to_supervised, MyConfig, SeyfriedParser, BIWIParser
 import matplotlib.pyplot as plt
 
 np.random.seed(7)
-parser = SeyfriedParser()
-pos_data, vel_data, time_data = parser.load('/home/jamirian/workspace/crowd_sim/tests/sey01/sey01.sey')
+# parser = SeyfriedParser()
+# pos_data, vel_data, time_data = parser.load('/home/jamirian/workspace/crowd_sim/tests/sey01/sey01.sey')
+
+parser = BIWIParser()
+pos_data, vel_data, time_data = parser.load('/home/jamirian/workspace/crowd_sim/tests/eth/eth.wap')
+
 n_ped = len(pos_data)
 train_size = int(n_ped * 0.67)
 test_size = n_ped - train_size

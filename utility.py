@@ -4,11 +4,7 @@ import numpy as np
 import os
 from pandas import DataFrame, concat
 
-
-class MyConfig:
-    def __init__(self, n_past=8, n_next=12):
-        self.n_past = n_past
-        self.n_next = n_next
+from lstm_model.learning_utils import MyConfig
 
 
 class ConstVelModel:

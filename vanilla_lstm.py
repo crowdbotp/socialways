@@ -21,7 +21,7 @@ n_out_features = 2
 train_rate = 0.8
 learning_rate = 4e-3
 weight_decay = 4e-3
-# batch_size = 256
+def_batch_size = 256
 n_epochs = 1000
 
 if torch.cuda.is_available():
@@ -40,6 +40,9 @@ class PredictorLSTM(nn.Module):
         self.lstm = nn.LSTM(input_size=feature_size, hidden_size=hidden_size, num_layers=num_layers).cuda()
         self.fc_out = nn.Linear(hidden_size, pred_length * 2).cuda()
 
+        # it gives out just one location
+        self.one_out = nn.Linear(hidden_size, 2).cuda()
+
         #self.lstm.weight_hh_l0.data.fill_(0)
         nn.init.xavier_uniform_(self.fc_out.weight)
 
@@ -53,20 +56,33 @@ class PredictorLSTM(nn.Module):
         # self.optimizer = torch.optim.Adam(self.parameters(), lr=learning_rate, weight_decay=weight_decay)
         self.optimizer = torch.optim.Adam(self.parameters(), lr=learning_rate)
 
-    def init_state(self):
+    def init_state(self, minibatch_size=1):
         # The axes semantics are (num_layers, minibatch_size, hidden_dim)
-        return (torch.zeros(1, 1, self.hidden_size).cuda(),
-                torch.zeros(1, 1, self.hidden_size).cuda())
+        return (torch.zeros(self.n_layers, minibatch_size, self.hidden_size).cuda(),
+                torch.zeros(self.n_layers, minibatch_size, self.hidden_size).cuda())
 
+    ### sequence-prediction
+    # def forward(self, x):
+    #     self.hidden = self.init_state()
+    #     for xi in x:
+    #         xi = xi.view(1, 1, self.feature_size)
+    #         y, self.hidden = self.lstm(xi, self.hidden)
+    #     # y = self.linear(y)
+    #     # y = self.sigmoid(y)
+    #     # y = self.relu(y)
+    #     y = self.fc_out(y)
+    #     return y
+
+    ### goal-prediction
     def forward(self, x):
         self.hidden = self.init_state()
         for xi in x:
             xi = xi.view(1, 1, self.feature_size)
             y, self.hidden = self.lstm(xi, self.hidden)
-        # y = self.linear(y)
+        y = self.linear(y)
         # y = self.sigmoid(y)
         # y = self.relu(y)
-        y = self.fc_out(y)
+        y = self.one_out(y)
         return y
 
 
@@ -80,7 +96,7 @@ def update(model, y_list, y_hat_list):
     return loss.item()
 
 
-def train(model, ped_data, batch_size=256):
+def train(model, ped_data, batch_size=def_batch_size):
     running_loss = 0
     running_cntr = 0
     y_list = []
@@ -92,8 +108,15 @@ def train(model, ped_data, batch_size=256):
             model.hidden = model.init_state()
 
             x = ped_i_tensor[t-n_past:t, 0:n_inp_features]
-            y = (ped_i_tensor[t:t + n_next, 0:2] - x[-1, 0:2]).view(n_next, 2)
-            y_hat = model(x).view(n_next, 2)
+
+            # sequence-prediction
+            # y = (ped_i_tensor[t:t + n_next, 0:2] - x[-1, 0:2]).view(n_next, 2)
+            # y_hat = model(x).view(n_next, 2)
+
+            # goal-prediction
+            y = (ped_i_tensor[t + n_next-1, 0:2] - x[-1, 0:2]).view(1, 2)
+            y_hat = model(x).view(1, 2)
+
 
             y_list.append(y)
             y_hat_list.append(y_hat)
@@ -119,8 +142,14 @@ def test(model, ped_data):
             ped_i_tensor = torch.FloatTensor(ped_data[ii]).cuda()
             for t in range(n_past, ped_i_tensor.size(0) - n_next + 1, n_past):
                 x = ped_i_tensor[t-n_past:t, 0:n_inp_features]
-                y = (ped_i_tensor[t:t+n_next, 0:2] - x[-1, 0:2]).view(n_next, 2)
-                y_hat = model(x).view(n_next, 2)
+
+                # y = (ped_i_tensor[t:t+n_next, 0:2] - x[-1, 0:2]).view(n_next, 2)
+                # y_hat = model(x).view(n_next, 2)
+
+                # Goal Prediction
+                y = (ped_i_tensor[t+n_next-1, 0:2] - x[-1, 0:2]).view(1, 2)
+                y_hat = model(x).view(1, 2)
+
                 loss = model.loss_func(y_hat, y)
                 running_loss += loss.item()
                 running_cntr += 1
@@ -130,12 +159,19 @@ def test(model, ped_data):
             ped_i_tensor = torch.FloatTensor(ped_data[ii]).cuda()
             for t in range(n_past, ped_i_tensor.size(0) - n_next + 1, n_past):
                 x = ped_i_tensor[t - n_past:t, 0:n_inp_features]
-                y = (ped_i_tensor[t:t + n_next, 0:2] - x[-1, 0:2]).view(n_next, 2)
-                y_hat = model(x).view(n_next, 2)
-
                 x_np = x.cpu().data.numpy().reshape((n_past, n_inp_features))[:, 0:2]
+
+                # y = (ped_i_tensor[t:t + n_next, 0:2] - x[-1, 0:2]).view(n_next, 2)
+                # y_hat = model(x).view(n_next, 2)
+                # y_np = y.cpu().data.numpy().reshape((n_next, 2))
+                # y_hat_np = np.vstack((np.array([0, 0]), y_hat.cpu().data.numpy().reshape((n_next, 2)))) + x_np[-1, 0:2]
+
+                # Goal Prediction
+                y = (ped_i_tensor[t:t + n_next, 0:2] - x[-1, 0:2]).view(n_next, 2)
+                y_hat = model(x).view(1, 2)
                 y_np = y.cpu().data.numpy().reshape((n_next, 2))
-                y_hat_np = np.vstack((np.array([0, 0]), y_hat.cpu().data.numpy().reshape((n_next, 2)))) + x_np[-1, 0:2]
+                y_hat_np = np.vstack((np.array([0, 0]), y_hat.cpu().data.numpy().reshape((1, 2)))) + x_np[-1, 0:2]
+
                 y_cv = np.vstack((x_np[-1, 0:2], cv_model.predict(x_np)))
 
                 plt.plot(x_np[:, 0], x_np[:, 1], 'y--')

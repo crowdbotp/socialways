@@ -2,12 +2,12 @@ import numpy as np
 from keras.engine.saving import model_from_json
 import matplotlib.pyplot as plt
 from matplotlib.figure import figaspect
-from lstm_model.utility import Scale, MyConfig, ConstVelModel, SeyfriedParser
-from lstm_model.utility import to_supervised, load
+from lstm_model.utility import Scale, MyConfig, ConstVelModel, SeyfriedParser, BIWIParser
+from lstm_model.utility import to_supervised
 from tabulate import tabulate
 
 # Load LSTM model
-model_name = "models/model1"
+model_name = "models/model_test"
 json_file = open(model_name + ".json", 'r')
 loaded_model_json = json_file.read()
 json_file.close()
@@ -19,8 +19,13 @@ print("Loaded model from file")
 cv_model = ConstVelModel()
 
 np.random.seed(7)
-parser = SeyfriedParser()
-pos_data, vel_data, time_data = parser.load('/home/jamirian/workspace/crowd_sim/tests/sey01/sey01.sey')
+# parser = SeyfriedParser()
+# pos_data, vel_data, time_data = parser.load('/home/jamirian/workspace/crowd_sim/tests/sey01/sey01.sey')
+
+parser = BIWIParser()
+pos_data, vel_data, time_data = parser.load('/home/jamirian/workspace/crowd_sim/tests/eth/eth.wap')
+
+
 scale = parser.scale
 n_ped = len(pos_data)
 
@@ -98,10 +103,10 @@ print(tabulate([['Lstm', lstm_ade, lstm_fde], ['cv', cv_ade, cv_fde]],
                headers=['Method', 'ADE Error', 'FDE Error']))
 
 # Plot Results
-exit(1)
+# exit(1)
 
 for i in range(len(test)):
-    ped_i = np.array(to_supervised(test[i], n_past, n_next).values)
+    ped_i = np.array(to_supervised(test[i], n_past, n_next))
     num_ped_samples = ped_i.shape[0]
     gt_inp = ped_i[:, 0:n_X].reshape((num_ped_samples, n_past, 2))
     gt_out = ped_i[:, n_X:n_XIY].reshape((num_ped_samples, n_next * 2))

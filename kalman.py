@@ -57,6 +57,8 @@ class MyKalman:
         return filtered_state_means[:, 0:2], filtered_state_means[:, 2:4]
 
     def smooth(self, measurement):
+        if measurement.shape[0] == 1:
+            return measurement, np.zeros((1, 2))
 
         f = self.kf.em(measurement, n_iter=self.n_iter)
         (smoothed_state_means, smoothed_state_covariances) = f.smooth(measurement)
@@ -104,6 +106,11 @@ def test(seyfried=False, biwi=False):
     plt.legend()
 
     plt.show()
+
+
+def smooth_and_store(filename_in, filename_out):
+    pass
+
 
 if __name__ == '__main__':
     test(biwi=True)
