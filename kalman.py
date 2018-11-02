@@ -1,7 +1,7 @@
 from pykalman import KalmanFilter
 import numpy as np
 import matplotlib.pyplot as plt
-from lstm_model.utility import SeyfriedParser, BIWIParser
+from lstm_model.parse_utils import SeyfriedParser, BIWIParser
 
 
 class MyKalman:
@@ -68,12 +68,12 @@ class MyKalman:
 def test(seyfried=False, biwi=False):
     if seyfried:
         parser = SeyfriedParser()
-        pos_data, vel_data, _ = parser.load('/home/jamirian/workspace/crowd_sim/tests/sey01/sey01.sey', down_sample=1)
-        fps = parser.new_fps
+        pos_data, vel_data, _ = parser.load('../data/sey01.sey', down_sample=1)
+        fps = parser.actual_fps
     elif biwi:
         parser = BIWIParser()
-        pos_data, vel_data, _ = parser.load('/home/jamirian/workspace/crowd_sim/tests/eth/eth.wap', down_sample=1)
-        fps = parser.new_fps
+        pos_data, vel_data, _ = parser.load('../data/eth.wap', down_sample=1)
+        fps = parser.actual_fps
     else:
         return
 

@@ -4,7 +4,7 @@ from keras import Model
 from keras.callbacks import ModelCheckpoint
 from keras.layers import LSTM, Dense, Reshape, Input, concatenate, Conv2D, Flatten, Dropout, SimpleRNN
 from keras.utils import plot_model
-from lstm_model.utility import Scale, to_supervised, MyConfig, SeyfriedParser
+from lstm_model.parse_utils import Scale, to_supervised, MyConfig, SeyfriedParser
 import matplotlib.pyplot as plt
 import pickle
 

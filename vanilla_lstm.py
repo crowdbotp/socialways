@@ -7,7 +7,7 @@ from pathlib import Path
 import matplotlib.pyplot as plt
 from matplotlib.figure import figaspect
 
-from lstm_model.utility import to_supervised, SeyfriedParser, MyConfig, BIWIParser, ConstVelModel
+from lstm_model.parse_utils import to_supervised, SeyfriedParser, MyConfig, BIWIParser, ConstVelModel
 from lstm_model.kalman import MyKalman
 
 np.random.seed(1)
@@ -189,9 +189,9 @@ def test(model, ped_data):
 
 def run():
     # parser = SeyfriedParser()
-    # pos_data, vel_data, time_data = parser.load('/home/jamirian/workspace/crowd_sim/tests/sey01/sey01.sey')
+    # pos_data, vel_data, time_data = parser.load('../data/sey01.sey')
     parser = BIWIParser()
-    pos_data, vel_data, time_data = parser.load('/home/jamirian/workspace/crowd_sim/tests/eth/eth.wap')
+    pos_data, vel_data, time_data = parser.load('../data/eth.wap')
     scale = parser.scale
 
     n_ped = len(pos_data)
@@ -202,7 +202,7 @@ def run():
 
     print('Yes! Smoothing the trajectories in train_set ...')
     for i in range(train_size):
-        kf = MyKalman(1 / parser.new_fps, n_iter=5)
+        kf = MyKalman(1 / parser.actual_fps, n_iter=5)
         pos_data[i], vel_data[i] = kf.smooth(pos_data[i])
 
     # Scaling

@@ -3,8 +3,8 @@ import numpy as np
 from keras.engine.saving import model_from_json
 import matplotlib.pyplot as plt
 from matplotlib.figure import figaspect
-from lstm_model.utility import Scale, MyConfig, ConstVelModel
-from lstm_model.utility import to_supervised, SeyfriedParser
+from lstm_model.parse_utils import Scale, to_supervised, SeyfriedParser, BIWIParser
+from lstm_model.math_utils import MyConfig, ConstVelModel
 from tabulate import tabulate
 
 np.random.seed(7)

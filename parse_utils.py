@@ -4,28 +4,6 @@ import numpy as np
 import os
 from pandas import DataFrame, concat
 
-from lstm_model.learning_utils import MyConfig
-
-
-class ConstVelModel:
-    def __init__(self, conf=MyConfig()):
-        self.my_conf = conf
-
-    def predict(self, inp): # use config for
-        #inp.ndim = 2
-        avg_vel = np.array([0, 0])
-        if inp.ndim > 1 and inp.shape[0] > 1:
-            for i in range(1, inp.shape[0]):
-                avg_vel = avg_vel + inp[i, :]-inp[i-1, :]
-            avg_vel = avg_vel / (inp.shape[0]-1)
-
-        cur_pos = inp[-1, :]
-        out = np.empty((0, 2))
-        for i in range(0, self.my_conf.n_next):
-            out = np.vstack((out, cur_pos + avg_vel * (i+1)))
-
-        return out
-
 
 class Scale(object):
     '''
@@ -39,23 +17,28 @@ class Scale(object):
         self.max_y = -math.inf
         self.sx, self.sy = 1, 1
 
-    def calc_scale(self):
+    def calc_scale(self, keep_ratio=True):
         self.sx = 1 / (self.max_x - self.min_x)
         self.sy = 1 / (self.max_y - self.min_y)
-        # FIXME: sx and sy should be equal => ok
-        if self.sx > self.sy:
-            self.sx = self.sy
-        else:
-            self.sy = self.sx
+        if keep_ratio:
+            if self.sx > self.sy:
+                self.sx = self.sy
+            else:
+                self.sy = self.sx
 
-    def normalize(self, data, shift=True):
-        if shift:
-            data[:, 0] = (data[:, 0] - self.min_x) * self.sx
-            data[:, 1] = (data[:, 1] - self.min_y) * self.sy
+    def normalize(self, data, shift=True, inPlace=True):
+        if inPlace:
+            data_copy = data
         else:
-            data[:, 0] = data[:, 0] * self.sx
-            data[:, 1] = data[:, 1] * self.sy
-        return data
+            data_copy = np.copy(data)
+
+        if shift:
+            data_copy[:, 0] = (data[:, 0] - self.min_x) * self.sx
+            data_copy[:, 1] = (data[:, 1] - self.min_y) * self.sy
+        else:
+            data_copy[:, 0] = data[:, 0] * self.sx
+            data_copy[:, 1] = data[:, 1] * self.sy
+        return data_copy
 
     def denormalize(self, data, shift=True, inPlace=False):
         if inPlace:
@@ -80,7 +63,7 @@ class Scale(object):
 class SeyfriedParser:
     def __init__(self):
         self.scale = Scale()
-        self.new_fps = 1
+        self.actual_fps = 0.
 
     def load(self, filename, down_sample=4):
         '''
@@ -119,7 +102,7 @@ class SeyfriedParser:
                     i += 1
                     if i == 4:
                         fps = float(row[0])
-                        self.new_fps = fps/down_sample
+                        self.actual_fps = fps / down_sample
 
                     if len(row) != 5:
                         continue
@@ -175,11 +158,14 @@ class SeyfriedParser:
 class BIWIParser:
     def __init__(self):
         self.scale = Scale()
+        self.all_ids = list()
+        self.actual_fps = 0.
 
     def load(self, filename, down_sample=1):
         pos_data_dict = dict()
         vel_data_dict = dict()
         time_data_dict = dict()
+        self.all_ids.clear()
 
         # check to search for many files?
         file_names = list()
@@ -192,7 +178,7 @@ class BIWIParser:
         else:
             file_names.append(filename)
 
-        self.new_fps = 2.5
+        self.actual_fps = 2.5
         for file in file_names:
             with open(file, 'r') as data_file:
                 content = data_file.readlines()
@@ -221,9 +207,11 @@ class BIWIParser:
                     pos_data_dict[id].append(np.array([px, py]))
                     vel_data_dict[id].append(np.array([vx, vy]))
                     time_data_dict[id] = np.hstack((time_data_dict[id], np.array([ts])))
+            self.all_ids += id_list
 
         p_data = list()
         v_data = list()
+        t_data = list()
 
         for key, value in pos_data_dict.items():
             poss_i = np.array(value)
@@ -231,7 +219,7 @@ class BIWIParser:
             # TODO: you can apply a Kalman filter/smoother on v_data
             vels_i = np.array(vel_data_dict[key])
             v_data.append(vels_i)
-        t_data = np.array(time_data_dict)
+            t_data.append(np.array(time_data_dict[key]))
 
         for i in range(len(p_data)):
             poss_i = np.array(p_data[i])
