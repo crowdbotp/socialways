@@ -1,3 +1,4 @@
+import os
 import random
 from math import atan2, cos, sin, sqrt
 
@@ -11,29 +12,32 @@ from torch import optim
 from torch.autograd import Variable
 from torch.utils.data import DataLoader
 
-from lstm_model.learning_utils import adjust_learning_rate, MyConfig
-from lstm_model.math_utils import ConstVelModel
-from lstm_model.parse_utils import to_supervised, SeyfriedParser, BIWIParser
-from lstm_model.kalman import MyKalman
+from src.learning_utils import adjust_learning_rate, MyConfig
+from src.math_utils import ConstVelModel
+from src.parse_utils import to_supervised, SeyfriedParser, BIWIParser
+from src.kalman import MyKalman
 import matplotlib.pyplot as plt
 
+from src.visualize import Display
+
+data_dir = '../data/eth'
 np.random.seed(1)
-config = MyConfig(n_past=8, n_next=16)
+config = MyConfig(n_past=8, n_next=8)
 n_past = config.n_past
 n_next = config.n_next
 n_inp_features = 4  # (x, y),  /vx, vy
 n_out_features = 2
 
-train_rate = 0.8
+train_rate = 1.  # 0.8
 learning_rate = 4e-3
 weight_decay = 4e-3
-lambda_l2_loss = 500
+lambda_l2_loss = 5
 lambda_dc_loss = 1
-test_interval = 150  # FIXME << ===+   << ===+   << ===+
+test_interval = 120  # FIXME << ===+   << ===+   << ===+
 optim_betas = (0.9, 0.999)
 def_batch_size = 128
 n_epochs = 2000
-noise_vec_len = 10
+noise_vec_len = 32
 
 def bce_loss(input_, target_):
     neg_abs = -input_.abs()
@@ -63,8 +67,8 @@ class Generator(nn.Module):
                             num_layers=self.n_lstm_layers, batch_first=True, bidirectional=self.is_blstm).cuda()
 
         self.fc_out = nn.Linear(self.hidden_size_2, self.out_len * 2).cuda()
-        self.drop_out_1 = nn.Dropout(0.1)
-        self.drop_out_2 = nn.Dropout(0.1)
+        self.drop_out_1 = nn.Dropout(0.2)
+        self.drop_out_2 = nn.Dropout(0.2)
 
         # Hidden Layers
         self.fc_1 = nn.Sequential(
@@ -175,10 +179,11 @@ d_optimizer = optim.Adam(discriminator.parameters(), lr=learning_rate, betas=opt
 g_optimizer = optim.Adam(generator.parameters(), lr=learning_rate, betas=optim_betas)
 cv_model = ConstVelModel()
 
+
 # parser = SeyfriedParser()
 # pos_data, vel_data, time_data = parser.load('../data/sey01.sey')
 parser = BIWIParser()
-pos_data, vel_data, time_data = parser.load('../data/eth.wap')
+pos_data, vel_data, time_data = parser.load(os.path.join(data_dir, 'obsmat.txt'))
 # pos_data, vel_data, time_data = parser.load('../data/hotel.wap')
 scale = parser.scale
 
@@ -188,10 +193,10 @@ test_size = n_ped - train_size
 
 print('Dont forget to smooth the trajectories?')
 
-# print('Yes! Smoothing the trajectories in train_set ...')
-# for i in range(train_size):
-#     kf = MyKalman(1 / parser.actual_fps, n_iter=5)
-#     pos_data[i], vel_data[i] = kf.smooth(pos_data[i])
+print('Yes! Smoothing the trajectories in train_set ...')
+for i in range(train_size):
+    kf = MyKalman(1 / parser.actual_fps, n_iter=5)
+    pos_data[i], vel_data[i] = kf.smooth(pos_data[i])
 
 # Scaling
 all_peds_data_list = list()
@@ -348,6 +353,9 @@ def build_TEOM(yi_hat, Y_i_hats, ped_id=0):
                 cartesian_grid[rot_coord[0], rot_coord[1], 0] += PIX_VALUE/K  # * approach_rate[j]
                 cartesian_grid[rot_coord[0], rot_coord[1], 1] += PIX_VALUE/K  # * DCAs[j]
 
+                if cartesian_grid[rot_coord[0], rot_coord[1], 0] > 255:
+                    x = 1
+
                 # polar_coord_0 = int(round(r * (GRID_SIZE[0] - 1) / sqrt(2)))
                 # polar_coord_1 = int(round(th * (GRID_SIZE[1] - 1) / (2 * np.pi) + cntr[1]))
                 # aligned_polar_grid[polar_coord_0, polar_coord_1, 0] += approach_rate[j] * PIX_VALUE
@@ -358,17 +366,22 @@ def build_TEOM(yi_hat, Y_i_hats, ped_id=0):
         gif_writer.append_data(cartesian_grid)
 
 
-K = 60  # Number of samples
+K = 20  # Number of samples
+disp = Display(data_dir)
+
 def visualize():
     print("Don't forget to correct here and test the test set!")
-    for ii in range(0, len(train_peds), 1):
+    for ii in range(22, len(train_peds), 4):
         ped_i_tensor = torch.FloatTensor(train_peds[ii]).cuda()
         for t1_ind_i in range(n_past, ped_i_tensor.size(0) - n_next + 1, 1000):
             Y_hat = np.empty((0, K, n_next, 2))
 
             ts = train_time_data[ii][t1_ind_i-n_past]
+            t0 = train_time_data[ii][t1_ind_i-1]
             t1 = train_time_data[ii][t1_ind_i]
             te = train_time_data[ii][t1_ind_i+n_next-1]
+
+            disp.grab_frame(t0)
 
             # find neighbors
             for jj in range(len(train_peds)):
@@ -377,7 +390,7 @@ def visualize():
                 te_ind_j = np.array(np.where(train_time_data[jj] == te))
 
                 # if ii == jj or ts_ind_j.size == 0 or te_ind_j.size == 0:
-                if ii == jj or t1_ind_j.size == 0 or t1_ind_j[0][0] < 2:
+                if ii == jj or t1_ind_j.size == 0 or t1_ind_j[0][0] < n_past-1:
                     continue
                 t1_ind_j = t1_ind_j[0][0]
                 # ts_ind_j = ts_ind_j[0][0]
@@ -398,16 +411,25 @@ def visualize():
                     # ========== PLOT ==========
                     yj_hat_np = np.vstack((xj_np[-1, 0:2], yj_hat_np))
                     plt.plot(yj_hat_np[:, 0], yj_hat_np[:, 1], 'b.')
+                    disp.plot_path(scale.denormalize(yj_hat_np[:, 0:2]), jj)
+
                     if kk == K:
                         plt.plot(yj_np[:, 0] + xj_np[-1, 0], yj_np[:, 1] + xj_np[-1, 1], 'g.')
 
                 y_hat_j = np.stack(y_hat_j).reshape((1, K, n_next, 2))
                 Y_hat = np.vstack((Y_hat, y_hat_j))
 
+                disp.plot_ped(scale.denormalize(xj_np[-1, 0:2]))
+                disp.plot_path(scale.denormalize(xj_np[:, 0:2]), ii, 'g.')
+                disp.plot_path(scale.denormalize(yj_np[:, 0:2] + xj_np[-1, 0:2]), ii, 'g--')
+
             xi = ped_i_tensor[t1_ind_i - n_past:t1_ind_i, 0:n_inp_features].view(1, n_past, -1)
             xi_np = xi.cpu().data.numpy().reshape((n_past, n_inp_features))
             yi = (ped_i_tensor[t1_ind_i:t1_ind_i + n_next, 0:2] - xi[0, -1, 0:2]).view(1, n_next, 2)
             yi_np = yi.cpu().data.numpy().reshape((n_next, 2))
+            disp.plot_path(scale.denormalize(xi_np[:, 0:2]), ii, 'g.')
+            disp.plot_path(scale.denormalize(yi_np[:, 0:2] + xi_np[-1, 0:2]), ii, 'g--')
+            disp.plot_ped(scale.denormalize(xi_np[-1, 0:2]), ii, color=(0, 100, 200))
 
             ci_real = discriminator(xi, yi)
 
@@ -443,17 +465,19 @@ def visualize():
             plt.xlim((0, 1))
 
             # plt.show()
+            disp.add_orig_frame(0.5)
+            disp.show('frame %d' % t0)
             break
 
 
 print("Train the model ...")
-generator.load_state_dict(torch.load('./models/gan-g.pt'))
-discriminator.load_state_dict(torch.load('./models/gan-d.pt'))
+# generator.load_state_dict(torch.load('./models/gan-g.pt'))
+# discriminator.load_state_dict(torch.load('./models/gan-d.pt'))
 for epoch in range(1, n_epochs + 1):
     adjust_learning_rate(d_optimizer, epoch)
     adjust_learning_rate(g_optimizer, epoch)
 
-    # train()
+    train()
     if epoch % test_interval == 0:
         torch.save(generator.state_dict(), './models/gan-g.pt')
         torch.save(discriminator.state_dict(), './models/gan-d.pt')

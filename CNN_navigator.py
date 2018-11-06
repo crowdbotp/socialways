@@ -4,7 +4,7 @@ import torch.nn as nn
 import matplotlib.pyplot as plt
 from torch.utils.data import DataLoader
 
-from lstm_model.parse_utils import Scale
+from src.parse_utils import Scale
 
 
 class CNN(nn.Module):

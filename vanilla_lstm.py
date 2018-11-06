@@ -7,8 +7,8 @@ from pathlib import Path
 import matplotlib.pyplot as plt
 from matplotlib.figure import figaspect
 
-from lstm_model.parse_utils import to_supervised, SeyfriedParser, MyConfig, BIWIParser, ConstVelModel
-from lstm_model.kalman import MyKalman
+from src.parse_utils import to_supervised, SeyfriedParser, MyConfig, BIWIParser, ConstVelModel
+from src.kalman import MyKalman
 
 np.random.seed(1)
 config = MyConfig(n_past=8, n_next=8)

@@ -5,10 +5,10 @@ from math import atan2, cos, sin, sqrt, exp
 import imageio
 from PIL import Image
 from scipy import ndimage
-from lstm_model.kalman import MyKalman
-from lstm_model.learning_utils import MyConfig
-from lstm_model.math_utils import cart2pol, norm, unit
-from lstm_model.parse_utils import Scale, SeyfriedParser, BIWIParser
+from src.kalman import MyKalman
+from src.learning_utils import MyConfig
+from src.math_utils import cart2pol, norm, unit
+from src.parse_utils import Scale, SeyfriedParser, BIWIParser
 import numpy as np
 import matplotlib.pyplot as plt
 

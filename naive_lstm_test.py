@@ -2,8 +2,8 @@ import numpy as np
 from keras.engine.saving import model_from_json
 import matplotlib.pyplot as plt
 from matplotlib.figure import figaspect
-from lstm_model.parse_utils import Scale, MyConfig, ConstVelModel, SeyfriedParser, BIWIParser
-from lstm_model.parse_utils import to_supervised
+from src.parse_utils import Scale, MyConfig, ConstVelModel, SeyfriedParser, BIWIParser
+from src.parse_utils import to_supervised
 from tabulate import tabulate
 
 # Load LSTM model

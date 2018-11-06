@@ -1,5 +1,5 @@
 import numpy as np
-from lstm_model.learning_utils import MyConfig
+from src.learning_utils import MyConfig
 from numpy import linalg as la
 
 eps = np.finfo(float).eps

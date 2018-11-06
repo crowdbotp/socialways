@@ -1,7 +1,7 @@
 from pykalman import KalmanFilter
 import numpy as np
 import matplotlib.pyplot as plt
-from lstm_model.parse_utils import SeyfriedParser, BIWIParser
+from src.parse_utils import SeyfriedParser, BIWIParser
 
 
 class MyKalman:
