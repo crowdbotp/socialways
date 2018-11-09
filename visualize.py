@@ -1,12 +1,28 @@
 import os
 
-import cv2
 import numpy as np
 import matplotlib.pyplot as plt
 from PIL import Image
 
-POS_MSEC = cv2.CAP_PROP_POS_MSEC
-POS_FRAMES = cv2.CAP_PROP_POS_FRAMES
+# import cv2
+# POS_MSEC = cv2.CAP_PROP_POS_MSEC
+# POS_FRAMES = cv2.CAP_PROP_POS_FRAMES
+
+
+class FakeDisplay:
+    def __init__(self, datadir):
+        pass
+    def grab_frame(self, frame_id):
+        pass
+    def plot_path(self, path, pid=-1, args=''):
+        pass
+    def plot_ped(self, pos=(0, 0), pid=-1, color=(0, 0, 192)):
+        pass
+    def show(self, title='frame'):
+        pass
+    def add_orig_frame(self, alpha=0.5):
+        pass
+
 
 class Display:
     def __init__(self, datadir):
@@ -252,8 +268,13 @@ def to_image_frame(Hinv, loc):
     Given H^-1 and (x, y, z) in world coordinates, returns (u, v, 1) in image
     frame coordinates.
     """
-    loc = np.dot(Hinv, loc)  # to camera frame
-    return loc/loc[2] # to pixels (from millimeters)
+    if loc.ndim > 1:
+        loc_tr = np.transpose(loc)
+        loc_tr = np.matmul(Hinv, loc_tr)  # to camera frame
+        return np.transpose(loc_tr/loc_tr[2])  # to pixels (from millimeters)
+    else:
+        loc = np.dot(Hinv, loc)  # to camera frame
+        return loc / loc[2]  # to pixels (from millimeters)
 
 
 

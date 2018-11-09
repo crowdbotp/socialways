@@ -31,6 +31,12 @@ def cart2pol(x, y):
     return np.array([rho, phi]).transpose()
 
 
+def pol2cart(rho, phi):
+    x = rho * np.cos(phi)
+    y = rho * np.sin(phi)
+    return np.array([x, y]).transpose()
+
+
 def norm(x):
     return la.norm(x)
 
