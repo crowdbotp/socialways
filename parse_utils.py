@@ -60,6 +60,83 @@ class Scale(object):
         return data_copy
 
 
+class BIWIParser:
+    def __init__(self):
+        self.scale = Scale()
+        self.all_ids = list()
+        self.actual_fps = 0.
+
+    def load(self, filename, down_sample=1):
+        pos_data_dict = dict()
+        vel_data_dict = dict()
+        time_data_dict = dict()
+        self.all_ids.clear()
+
+        # check to search for many files?
+        file_names = list()
+        if '*' in filename:
+            files_path = filename[:filename.index('*')]
+            extension = filename[filename.index('*') + 1:]
+            for file in os.listdir(files_path):
+                if file.endswith(extension):
+                    file_names.append(files_path + file)
+        else:
+            file_names.append(filename)
+
+        self.actual_fps = 2.5
+        for file in file_names:
+            with open(file, 'r') as data_file:
+                content = data_file.readlines()
+                id_list = list()
+                for row in content:
+                    row = row.split(' ')
+                    while '' in row: row.remove('')
+                    if len(row) != 8: continue
+
+                    ts = float(row[0])
+                    id = round(float(row[1]))
+                    if ts % down_sample != 0:
+                        continue
+
+                    px = float(row[2])
+                    py = float(row[4])
+                    vx = float(row[5])
+                    vy = float(row[7])
+
+                    if id not in id_list:
+                        id_list.append(id)
+                        pos_data_dict[id] = list()
+                        vel_data_dict[id] = list()
+                        time_data_dict[id] = np.empty(0, dtype=int)
+                        last_t = ts
+                    pos_data_dict[id].append(np.array([px, py]))
+                    vel_data_dict[id].append(np.array([vx, vy]))
+                    time_data_dict[id] = np.hstack((time_data_dict[id], np.array([ts])))
+            self.all_ids += id_list
+
+        p_data = list()
+        v_data = list()
+        t_data = list()
+
+        for key, value in pos_data_dict.items():
+            poss_i = np.array(value)
+            p_data.append(poss_i)
+            # TODO: you can apply a Kalman filter/smoother on v_data
+            vels_i = np.array(vel_data_dict[key])
+            v_data.append(vels_i)
+            t_data.append(np.array(time_data_dict[key]))
+
+        for i in range(len(p_data)):
+            poss_i = np.array(p_data[i])
+            self.scale.min_x = min(self.scale.min_x, min(poss_i[:, 0]))
+            self.scale.max_x = max(self.scale.max_x, max(poss_i[:, 0]))
+            self.scale.min_y = min(self.scale.min_y, min(poss_i[:, 1]))
+            self.scale.max_y = max(self.scale.max_y, max(poss_i[:, 1]))
+        self.scale.calc_scale()
+
+        return p_data, v_data, t_data
+
+
 class SeyfriedParser:
     def __init__(self):
         self.scale = Scale()
@@ -146,83 +223,6 @@ class SeyfriedParser:
 
         for i in range(len(pos_data_list)):
             poss_i = np.array(pos_data_list[i])
-            self.scale.min_x = min(self.scale.min_x, min(poss_i[:, 0]))
-            self.scale.max_x = max(self.scale.max_x, max(poss_i[:, 0]))
-            self.scale.min_y = min(self.scale.min_y, min(poss_i[:, 1]))
-            self.scale.max_y = max(self.scale.max_y, max(poss_i[:, 1]))
-        self.scale.calc_scale()
-
-        return p_data, v_data, t_data
-
-
-class BIWIParser:
-    def __init__(self):
-        self.scale = Scale()
-        self.all_ids = list()
-        self.actual_fps = 0.
-
-    def load(self, filename, down_sample=1):
-        pos_data_dict = dict()
-        vel_data_dict = dict()
-        time_data_dict = dict()
-        self.all_ids.clear()
-
-        # check to search for many files?
-        file_names = list()
-        if '*' in filename:
-            files_path = filename[:filename.index('*')]
-            extension = filename[filename.index('*') + 1:]
-            for file in os.listdir(files_path):
-                if file.endswith(extension):
-                    file_names.append(files_path + file)
-        else:
-            file_names.append(filename)
-
-        self.actual_fps = 2.5
-        for file in file_names:
-            with open(file, 'r') as data_file:
-                content = data_file.readlines()
-                id_list = list()
-                for row in content:
-                    row = row.split(' ')
-                    while '' in row: row.remove('')
-                    if len(row) != 8: continue
-
-                    ts = float(row[0])
-                    id = round(float(row[1]))
-                    if ts % down_sample != 0:
-                        continue
-
-                    px = float(row[2])
-                    py = float(row[4])
-                    vx = float(row[5])
-                    vy = float(row[7])
-
-                    if id not in id_list:
-                        id_list.append(id)
-                        pos_data_dict[id] = list()
-                        vel_data_dict[id] = list()
-                        time_data_dict[id] = np.empty(0, dtype=int)
-                        last_t = ts
-                    pos_data_dict[id].append(np.array([px, py]))
-                    vel_data_dict[id].append(np.array([vx, vy]))
-                    time_data_dict[id] = np.hstack((time_data_dict[id], np.array([ts])))
-            self.all_ids += id_list
-
-        p_data = list()
-        v_data = list()
-        t_data = list()
-
-        for key, value in pos_data_dict.items():
-            poss_i = np.array(value)
-            p_data.append(poss_i)
-            # TODO: you can apply a Kalman filter/smoother on v_data
-            vels_i = np.array(vel_data_dict[key])
-            v_data.append(vels_i)
-            t_data.append(np.array(time_data_dict[key]))
-
-        for i in range(len(p_data)):
-            poss_i = np.array(p_data[i])
             self.scale.min_x = min(self.scale.min_x, min(poss_i[:, 0]))
             self.scale.max_x = max(self.scale.max_x, max(poss_i[:, 0]))
             self.scale.min_y = min(self.scale.min_y, min(poss_i[:, 1]))

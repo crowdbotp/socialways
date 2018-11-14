@@ -30,14 +30,14 @@ class ConvLSTM(nn.Module):
         stride_3 = 1
         self.conv1 = nn.Sequential(  # input shape (1, 28, 28)
             nn.Conv2d(
-                in_channels=2,  # input height
+                in_channels=1,  # input height
                 out_channels=n_filters_1,  # n_filters
                 kernel_size=kernel_size,  # filter size
                 stride=stride_1,  # filter movement/step
                 padding=1,
             ), # if want same width and length of this image after con2d, padding=(kernel_size-1)/2 if stride=1
             nn.ReLU(),  # activation
-            nn.MaxPool2d(kernel_size=3),  # choose max value in 2x2 area, output shape (16, xxx, xxx)
+            nn.MaxPool2d(kernel_size=2),  # choose max value in 2x2 area, output shape (16, xxx, xxx)
             ).cuda()
 
         self.conv2 = nn.Sequential(  # input shape (16, 14, 14)
@@ -59,20 +59,29 @@ class ConvLSTM(nn.Module):
                 stride=stride_3,
                 padding=1),  # output shape (32, yyy, yyy)
             nn.ReLU(),  # activation
-            nn.MaxPool2d(kernel_size=3),  # output shape (32, yyy/4, yyy/4)
+            nn.MaxPool2d(kernel_size=2),  # output shape (32, yyy/4, yyy/4)
         ).cuda()
 
-        self.lstm_obsv_size = 32
+        self.lstm_obsv_size = 64
         self.lstm_teom_size = 64
-        mix_size = 32
         self.lstm_obsv = nn.LSTM(4, self.lstm_obsv_size, 1, batch_first=True).cuda()
         self.lstm_teom = nn.LSTM(6*6, self.lstm_teom_size, 1, batch_first=True).cuda()
-        self.fc_mix = nn.Sequential(
-            nn.Linear(self.lstm_obsv_size + self.lstm_teom_size, mix_size),
-            #nn.ReLU(),
-        ).cuda()
+        # self.fc_mix = nn.Sequential(
+        #     nn.Linear(self.lstm_obsv_size + self.lstm_teom_size, mix_size), #nn.ReLU(),
+        # ).cuda()
 
-        self.out = nn.Linear(mix_size, 2).cuda()
+        self.obsv_fc = nn.Linear(self.lstm_obsv_size, 64).cuda()
+        self.teom_fc = nn.Linear(self.lstm_teom_size, 64).cuda()
+        mix_size = 16
+        self.fc_mix = nn.ModuleList([nn.Linear(64 + 64, mix_size) for _ in range(n_next)]).cuda()
+
+        self.out = nn.Sequential(
+            nn.Linear(mix_size, 32),
+            nn.ReLU(0.1),
+            nn.Linear(32, 32),
+            nn.ReLU(0.1),
+            nn.Linear(32, 2)
+        ).cuda()
 
     def forward(self, obsv, teom):
         # teom = [bs, n_next, H, W, nch]
@@ -84,57 +93,59 @@ class ConvLSTM(nn.Module):
         obsv_state = (torch.zeros(1, bs, self.lstm_obsv_size).cuda(),
                       torch.zeros(1, bs, self.lstm_obsv_size).cuda())
 
-        (memory_obsv, _) = self.lstm_obsv(obsv, obsv_state)
-        memory_obsv = memory_obsv[:, -1, :]
-        teom_state = (torch.zeros(1, bs, self.lstm_teom_size).cuda(),
-                      torch.zeros(1, bs, self.lstm_teom_size).cuda())
+        (obsv_state, _) = self.lstm_obsv(obsv, obsv_state)
+        obsv_state = obsv_state[:, -1, :]
+        teom_hidden_state = (torch.zeros(1, bs, self.lstm_teom_size).cuda(),
+                             torch.zeros(1, bs, self.lstm_teom_size).cuda())
+        obsv_state = self.obsv_fc(obsv_state)
 
         y = torch.zeros(bs, n_next, 2).cuda()
 
         for t in range(ts):
-            teom_ch0 = teom[:, t, :, :, 0]
-            teom_ch1 = teom[:, t, :, :, 1]
-            teom_channels = torch.stack((teom_ch0, teom_ch1), 1)
+            # teom_ch0 = teom[:, t, :, :, 0]
+            # teom_ch1 = teom[:, t, :, :, 0]
+            # teom_channels = torch.stack((teom_ch0, teom_ch1), 1)
+            teom_channels = teom[:, t, :, :].unsqueeze(1)
             conved_teom = self.conv1(teom_channels)
             conved_teom = self.conv2(conved_teom)
             conved_teom = self.conv3(conved_teom)
             conved_teom_flat = conved_teom.view(bs, 1, -1)
-            (memory_teom, teom_state) = self.lstm_teom(conved_teom_flat, teom_state)
-            memory_teom = memory_teom.view(bs, -1)
-            memory_mix = torch.cat((memory_teom, memory_obsv), 1)
-            y_mix = self.fc_mix(memory_mix)
+            (teom_state, teom_hidden_state) = self.lstm_teom(conved_teom_flat, teom_hidden_state)
+            teom_state = teom_state.view(bs, -1)
+            teom_state = self.teom_fc(teom_state)
+            memory_mix = torch.cat((teom_state, obsv_state), 1)
+            y_mix = self.fc_mix[t](memory_mix)
             y[:, t, :] = self.out(y_mix)
 
         return y  # ,memory_teom  # for visualization
 
 
 # ================== Load Data ==================
-data = np.load('../teom/eth_big_file.npz')
+file_name = '../teom/eth_big_file.npz'
 data_dir = '../data/eth'
-
-Hfile = os.path.join(data_dir, "H.txt")
-H = np.loadtxt(Hfile)
-Hinv = np.linalg.inv(H)
-
-parser = BIWIParser()
-pos_data, vel_data, time_data = parser.load(os.path.join(data_dir, 'obsmat.txt'))
-scale = parser.scale
+data = np.load(file_name)
+print('Training on %s, Observe/Predict [%d]/[%d] frames' %(file_name, n_past, n_next))
 
 obsvs = data['obsvs']
 teoms = data['teoms']
 targets = data['targets']
-print('Obsv shape = %s |  TEOMs shape = %s |  Targets shape = %s' % (obsvs.shape, teoms.shape, targets.shape))
+
+row_size = teoms.shape[2]
+col_size = teoms.shape[3]
+teoms = teoms[:, :, row_size//4:row_size*3//4 + 1, col_size//4:col_size*3//4 + 1, 1]
+
+print('Obsv size:%s |  TEOMs size:%s |  Targets size:%s' % (obsvs.shape, teoms.shape, targets.shape))
 
 # ========== SCALE ============
 teoms = (teoms/255)
 y_flat = np.vstack(targets)
-y_scale = Scale()
-y_scale.min_x = min(y_flat[:, 0])
-y_scale.min_y = min(y_flat[:, 1])
-y_scale.max_x = max(y_flat[:, 0])
-y_scale.max_y = max(y_flat[:, 1])
-y_scale.calc_scale(keep_ratio=False)
-y_scale.normalize(y_flat, shift=False, inPlace=True)
+polar_scale = Scale()
+polar_scale.min_x = min(y_flat[:, 0])
+polar_scale.max_x = max(y_flat[:, 0])
+polar_scale.min_y = min(y_flat[:, 1])
+polar_scale.max_y = max(y_flat[:, 1])
+polar_scale.calc_scale(keep_ratio=False)
+polar_scale.normalize(y_flat, shift=False, inPlace=True)
 targets = y_flat.reshape((obsvs.shape[0], -1, 2))
 # ================================================
 
@@ -152,7 +163,7 @@ test_target = targets[train_size:]
 
 
 LR = 0.001  # learning rate
-N_EPOCH = 500
+N_EPOCH = 2000
 BATCH_SIZE = 32
 train = TensorDataset(torch.FloatTensor(train_obsv), torch.FloatTensor(train_teom), torch.FloatTensor(train_target))
 train_loader = DataLoader(dataset=train, batch_size=BATCH_SIZE, shuffle=False)
@@ -165,16 +176,24 @@ optimizer = torch.optim.Adam(model.parameters(), lr=LR)   # optimize all paramet
 loss_func = nn.MSELoss()                       # the target label is not one-hotted
 
 
-def test_one(xi, teom, target):
+# ===================================================
+Hfile = os.path.join(data_dir, "H.txt")
+Hinv = np.linalg.inv(np.loadtxt(Hfile))
+
+parser = BIWIParser()
+pos_data, vel_data, time_data = parser.load(os.path.join(data_dir, 'obsmat.txt'))
+scale = parser.scale
+
+def visualize_one(xi, teom, target):
     obsv = torch.FloatTensor(xi).cuda().unsqueeze(0)
     teom = torch.FloatTensor(teom).cuda().unsqueeze(0)
     # target = target
 
     output = model(obsv, teom)
     output = output.cpu().data.numpy().reshape((n_next, 2))
-    output = y_scale.denormalize(output, shift=True, inPlace=True)
+    output = polar_scale.denormalize(output, shift=False, inPlace=True)
 
-    target = y_scale.denormalize(target, shift=True, inPlace=False)
+    target = polar_scale.denormalize(target, shift=False, inPlace=False)
 
     base_v = xi[-1, 2:4]  # last instant vel
     base_v = (xi[-1, 0:2] - xi[0, 0:2]) / (len(xi) - 1)  # observation avg vel
@@ -211,12 +230,16 @@ def test_one(xi, teom, target):
 
     plt.legend((plot_pred, plot_obsv, plot_gt, plot_pos), ('pred', 'obsv', 'gt', 'cur pos'))
     plt.gcf().set_size_inches(16, 12)
-    plt.show()
+
+    # plt.xlim((0, 640))
+    # plt.ylim((-480, 0))
+    # plt.show()
 
 
 def eval(test_laoder_):
-    error_sum = 0
-    error_cnt = 0
+    ade_sum = 0
+    fde_sum = 0
+    err_counter = 0
 
     for _, (obsv_batch, teom_batch, target_batch) in enumerate(test_laoder_):
         obsv_batch = obsv_batch.cuda()
@@ -233,8 +256,8 @@ def eval(test_laoder_):
             xi = obsv_batch[ii].cpu().data.numpy().reshape((n_past, -1))
             obsv = teom_batch[ii]
 
-            output = y_scale.denormalize(output_batch[ii], shift=False, inPlace=True)
-            target = y_scale.denormalize(target_batch[ii], shift=False, inPlace=False)
+            output = polar_scale.denormalize(output_batch[ii], shift=False, inPlace=True)
+            target = polar_scale.denormalize(target_batch[ii], shift=False, inPlace=False)
 
             # target = target_batch[ii]
             # output = output_batch[ii]
@@ -251,15 +274,16 @@ def eval(test_laoder_):
 
                 pred = scale.denormalize(y_hat, shift=True, inPlace=True)
                 gt = scale.denormalize(y_gt, shift=True, inPlace=True)
-                error_sum += norm(pred - gt)
-                error_cnt += 1
+                ade_sum += norm(pred - gt)/n_next
+            fde_sum += norm(pred - gt)
+            err_counter += 1
 
-    return error_sum/error_cnt
+    return ade_sum/err_counter, fde_sum/err_counter
 
 
 
-min_train_loss = 1000
-model.load_state_dict(torch.load('./models/navigator0.pt'))
+min_test_error = 1000
+model.load_state_dict(torch.load(os.path.expanduser('~') + '/Dropbox/CVPR2019/models/navigator3.pt'))
 
 for epoch in range(1, N_EPOCH):
     loss_accum = 0
@@ -296,21 +320,21 @@ for epoch in range(1, N_EPOCH):
         #         plt.imshow(im_cnn)
         #         plt.show()
 
-    avg_loss = loss_accum/loss_count
-    if avg_loss < min_train_loss:
-        torch.save(model.state_dict(), './models/navigator0.pt')
-        min_train_loss = avg_loss
+    avg_loss = loss_accum/loss_count * 100
+    ade_err, fde_err = eval(test_loader)
+    print('Epoch [%3d/%d], Train Loss: %5f | Test ADE= %5f | Test FDE= %5f'
+          % (epoch, N_EPOCH, avg_loss, ade_err, fde_err))
 
-    tst_err = eval(test_loader)
-    print('eval error = ', tst_err)
+    if ade_err < min_test_error:
+        torch.save(model.state_dict(), os.path.expanduser('~') + '/Dropbox/CVPR2019/models/navigator3.pt')
+        min_test_error = ade_err
 
-    print('epoch [%3d/%d], Loss: %5f' % (epoch, N_EPOCH, avg_loss))
-    if epoch % 20 == 0:
+    if epoch % 10 == 0:
         rnd = np.random.randint(0, test_obsv.shape[0])
         for i in range(test_obsv.shape[0]):
             i = rnd
             obsv_i = test_obsv[i]
             target_i = test_target[i]
             teom_i = test_teom[i]
-            test_one(obsv_i, teom_i, target_i)
+            visualize_one(obsv_i, teom_i, target_i)
             break

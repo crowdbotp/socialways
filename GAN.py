@@ -17,33 +17,37 @@ from torch.autograd import Variable
 from torch.utils.data import DataLoader
 
 from src.learning_utils import adjust_learning_rate, MyConfig
-from src.math_utils import ConstVelModel, cart2pol
+from src.math_utils import ConstVelModel, cart2pol, eps
+from src.models import NaivePredictor, Discriminator, Generator, SequentialPredictor
 from src.parse_utils import *
 from src.kalman import MyKalman
 from src.visualize import Display, FakeDisplay, to_image_frame
 from src.vanilla_lstm import PredictorLSTM
 
 
-data_dir = '../data/eth'
-out_dir = '../teom/eth_gt/'
+data_dir = ''  # to be filled bellow
+out_dir = ''  # to be filled bellow
 np.random.seed(1)
 torch.manual_seed(1)
 config = MyConfig(n_past=8, n_next=8)
 n_past = config.n_past
 n_next = config.n_next
-n_inp_features = 4  # (x, y),  /vx, vy
+n_inp_features = 2  # (x, y),  /vx, vy
 n_out_features = 2
 
-train_rate = 1.  # 0.8
+test_interval = 10  # FIXME << ===+   << ===+   << ===+
+
 learning_rate = 4e-3
 weight_decay = 4e-3
-lambda_l2_loss = 10000
+lambda_l2_loss = 100
 lambda_dc_loss = 0
-test_interval = 60  # FIXME << ===+   << ===+   << ===+
 optim_betas = (0.9, 0.999)
 def_batch_size = 128
 n_epochs = 2000
 noise_vec_len = 32
+
+scale = []
+Hinv = []
 
 
 def bce_loss(input_, target_):
@@ -52,170 +56,49 @@ def bce_loss(input_, target_):
     return _loss.mean()
 
 
-class Generator(nn.Module):
-    def __init__(self, inp_len, out_len, noise_len=noise_vec_len):
-        super(Generator, self).__init__()
-        self.out_len = out_len
+# generator = Generator(n_past, n_next, n_inp_features, noise_vec_len)
+# generator = NaivePredictor(n_inp_features, n_next)
+generator = SequentialPredictor()
 
-        self.use_noise = True      # For using it as a solely predictor
-        self.noise_len = noise_len
-
-        self.n_lstm_layers = 1
-        self.inp_size_lstm = n_inp_features
-        self.hidden_size_lstm = 48
-        self.hidden_size_2 = 48
-        self.hidden_size_3 = 48
-        self.is_blstm = False
-
-        self.fc_in = nn.Sequential(nn.Linear(2, self.inp_size_lstm), nn.LeakyReLU(0.5)).cuda()
-
-        # self.embedding = nn.Linear(inp_len * 2, hidden_size_1)
-        self.lstm = nn.LSTM(input_size=self.inp_size_lstm, hidden_size=self.hidden_size_lstm,
-                            num_layers=self.n_lstm_layers, batch_first=True, bidirectional=self.is_blstm).cuda()
-
-        self.fc_out = nn.Linear(self.hidden_size_2, self.out_len * 2).cuda()
-        self.drop_out_1 = nn.Dropout(0.1)
-        self.drop_out_2 = nn.Dropout(0.05)
-
-        # Hidden Layers
-        self.fc_1 = nn.Sequential(
-            nn.Linear(self.hidden_size_lstm * (1 + self.is_blstm) + self.noise_len * self.use_noise, self.hidden_size_2)
-            , nn.Sigmoid()).cuda()
-
-        self.fc_2 = nn.Sequential(nn.Linear(self.hidden_size_2, self.hidden_size_3)
-                                  , nn.LeakyReLU(0.1)).cuda()
-
-    def forward(self, obsv, noise):
-        # input: (B, seq_len, 2)
-        # noise: (B, N)
-        batch_size = obsv.size(0)
-        obsv = obsv[:, :, 0:self.inp_size_lstm]
-
-        # ===== To use Dense Layer in the input ======
-        # rr = []
-        # for tt in range(obsv.size(1)):
-        #     rr.append(self.fc_in(obsv[:, tt, :]))
-        # obsv = torch.stack(rr, 1)
-
-        # initialize hidden state: (num_layers, minibatch_size, hidden_dim)
-        init_state = (torch.zeros(self.n_lstm_layers * (1 + self.is_blstm), batch_size, self.hidden_size_lstm).cuda(),
-                      torch.zeros(self.n_lstm_layers * (1 + self.is_blstm), batch_size, self.hidden_size_lstm).cuda())
-
-        (lstm_out, _) = self.lstm(obsv, init_state)  # encode the input
-        last_lstm_out = lstm_out[:, -1, :].view(batch_size, 1, -1)  # just keep the last output: (batch_size, 1, H)
-
-        # combine data with noise
-        if self.use_noise:
-            lstm_out_and_noise = torch.cat([last_lstm_out, noise.cuda().view(batch_size, 1, -1)], dim=2)
-        else:
-            lstm_out_and_noise = last_lstm_out
-
-        lstm_out_and_noise = self.drop_out_1(lstm_out_and_noise)
-        u = self.fc_1(lstm_out_and_noise)
-        u = self.drop_out_2(u)
-        u = self.fc_2(u)
-
-        # decode the data to generate fake sample
-        pred_batch = self.fc_out(u).view(batch_size, self.out_len, 2)
-        return pred_batch
-
-
-class Discriminator(nn.Module):
-    def __init__(self, obsv_len, pred_len):
-        super(Discriminator, self).__init__()
-        self.out_size_lstm = 32
-        self.hidden_size_fc = 32
-        self.obsv_len = obsv_len
-        self.pred_len = pred_len
-        self.n_lstm_layers = 1
-        self.is_blstm_obsv = False
-        self.is_blstm_pred = False
-        self.inp_size_lstm_obsv = n_inp_features
-        self.inp_size_lstm_pred = 2
-        self.lstm_obsv = nn.LSTM(input_size=self.inp_size_lstm_obsv, hidden_size=self.out_size_lstm,
-                                 num_layers=self.n_lstm_layers, batch_first=True,
-                                 bidirectional=self.is_blstm_obsv).cuda()
-
-        self.lstm_pred = nn.LSTM(input_size=self.inp_size_lstm_pred, hidden_size=self.out_size_lstm,
-                                 num_layers=self.n_lstm_layers, batch_first=True,
-                                 bidirectional=self.is_blstm_pred).cuda()
-
-        self.fc_1 = nn.Sequential(nn.Linear(self.out_size_lstm * (1 + self.is_blstm_pred) +
-                                            self.out_size_lstm * (1 + self.is_blstm_obsv), self.hidden_size_fc)
-                                  , nn.LeakyReLU(0.5)).cuda()
-        self.classifier = nn.Linear(self.hidden_size_fc, 1).cuda()
-
-    def forward(self, obsv, pred):
-        # obsv: (B, in_seq_len, F)
-        # pred: (B, out_seq_len, F)
-        batch_size = obsv.size(0)
-        obsv = obsv[:, :, :self.inp_size_lstm_obsv]
-        pred = pred[:, :, :self.inp_size_lstm_pred]
-
-        # initialize hidden state of obsv_lstm: (num_layers, minibatch_size, hidden_dim)
-        init_state1 = (torch.zeros(self.n_lstm_layers * (1 + self.is_blstm_obsv), batch_size, self.out_size_lstm).cuda(),
-                       torch.zeros(self.n_lstm_layers * (1 + self.is_blstm_obsv), batch_size, self.out_size_lstm).cuda())
-
-        # ! lstm_out: (batch_size, seq_len, H)
-        (obsv_lstm_out, _) = self.lstm_obsv(obsv, init_state1)
-        obsv_lstm_out = obsv_lstm_out[:, -1, :].view(batch_size, 1, -1)  # I just need the last output: (batch_size, 1, H)
-
-        # initialize hidden state of pred_lstm: (num_layers, minibatch_size, hidden_dim)
-        init_state2 = (torch.zeros(self.n_lstm_layers * (1 + self.is_blstm_pred), batch_size, self.out_size_lstm).cuda(),
-                       torch.zeros(self.n_lstm_layers * (1 + self.is_blstm_pred), batch_size, self.out_size_lstm).cuda())
-
-        # ! lstm_out: (batch_size, seq_len, H)
-        (pred_lstm_out, _) = self.lstm_pred(pred, init_state2)
-        pred_lstm_out = pred_lstm_out[:, -1, :].view(batch_size, 1, -1)  # I just need the last output: (batch_size, 1, H)
-
-        concat_lstm_outputs = torch.cat([obsv_lstm_out, pred_lstm_out], dim=2)
-
-        u = self.fc_1(concat_lstm_outputs)
-
-        # c: (batch_size, 1, 1)
-        c = self.classifier(u)
-        return c
-
-
-generator = Generator(n_past, n_next, noise_len=noise_vec_len)
-discriminator = Discriminator(n_past, n_next)
+discriminator = Discriminator(n_past, n_next, n_inp_features)
 discriminationLoss = nn.BCEWithLogitsLoss()  # Binary cross entropy
 groundTruthLoss = nn.MSELoss()
 d_optimizer = optim.Adam(discriminator.parameters(), lr=learning_rate, betas=optim_betas)
 g_optimizer = optim.Adam(generator.parameters(), lr=learning_rate, betas=optim_betas)
 cv_model = ConstVelModel()
-
-
-# parser = SeyfriedParser()
-# pos_data, vel_data, time_data = parser.load('../data/sey01.sey')
+v_lstm = PredictorLSTM(4, 8, 128, num_layers=1)
+v_lstm.load_state_dict(torch.load('./models/v-lstm.pt'))
 parser = BIWIParser()
-pos_data, vel_data, time_data = parser.load(os.path.join(data_dir, 'obsmat.txt'))
-scale = parser.scale
-
-n_ped = len(pos_data)
-train_size = int(n_ped * train_rate)
-test_size = n_ped - train_size
-all_peds = list()
-train_time_data = time_data[:train_size]
-test_time_data = time_data[train_size:]
 
 
-def prepare_data(smooth=True):
+def prepare_training_data(smooth_train_set=True, n_fold=5, test_fold=1):
+    # parser = SeyfriedParser()
+    # pos_data, vel_data, time_data = parser.load('../data/sey01.sey')
+    pos_data, vel_data, time_data = parser.load(os.path.join(data_dir, 'obsmat.txt'))
+    n_ped = len(pos_data)
+
+    test_ids = range(int((test_fold-1)/n_fold*n_ped), int(test_fold/n_fold*n_ped))
+    train_ids = [i for i in range(n_ped) if i not in test_ids]
+
     print('Dont forget to smooth the trajectories?')
-    if smooth:
+    if smooth_train_set:
         print('Yes! Smoothing the trajectories in train_set ...')
-        for i in range(train_size):
+        for i in train_ids:
             kf = MyKalman(1 / parser.actual_fps, n_iter=7)
             pos_data[i], vel_data[i] = kf.smooth(pos_data[i])
 
+    all_peds = list()
     # Scaling
     for i in range(len(pos_data)):
-        pos_data[i] = scale.normalize(pos_data[i], shift=True)
-        vel_data[i] = scale.normalize(vel_data[i], shift=False)
+        pos_data[i] = parser.scale.normalize(pos_data[i], shift=True)
+        vel_data[i] = parser.scale.normalize(vel_data[i], shift=False)
         _pv_i = np.hstack((pos_data[i], vel_data[i]))
         all_peds.append(_pv_i)
-    train_peds = np.array(all_peds[:train_size])
-    test_peds = np.array(all_peds[train_size:])
+
+    train_peds = np.concatenate((all_peds[:test_ids.start], all_peds[test_ids.stop:]))
+    train_timestamps = np.concatenate((time_data[:test_ids.start], time_data[test_ids.stop:]))
+    test_peds = np.array(all_peds[test_ids.start:test_ids.stop])
+    test_timestamps = time_data[test_ids.start:test_ids.stop]
 
     dataset_x = []
     dataset_y = []
@@ -230,13 +113,15 @@ def prepare_data(smooth=True):
     dataset_x_tensor = torch.stack(dataset_x, 0)
     dataset_y_tensor = torch.stack(dataset_y, 0)
 
+
     train_data = torch.utils.data.TensorDataset(dataset_x_tensor, dataset_y_tensor)
     train_loader = DataLoader(train_data, batch_size=def_batch_size, shuffle=False, num_workers=4)
-    return train_loader, train_peds, test_peds
+    return train_loader, train_peds, test_peds, train_timestamps, test_timestamps
 
 
-def train(train_loader_):
-    gen_loss_acc = 0
+def train_GAN(train_loader_):
+    gen_total_loss_accum = 0
+    gen_loss_gt = 0
     dcr_loss_real = 0
     dcr_loss_fake = 0
 
@@ -251,7 +136,7 @@ def train(train_loader_):
         # =============== Train Discriminator ================= #
         discriminator.zero_grad()
 
-        y_hat_1 = generator(xs, noise_1)  # for updating discriminator
+        y_hat_1 = generator(xs, noise_1, n_next)  # for updating discriminator
         y_hat_1.detach()
         c_hat_fake_1 = discriminator(xs, y_hat_1)  # classify fake samples
         # disc_loss_fakes = discriminationLoss(c_hat_fake_1, Variable(torch.zeros(batch_size, 1, 1).cuda()))
@@ -273,7 +158,7 @@ def train(train_loader_):
         # =============== Train Generator ================= #
         generator.zero_grad()
         discriminator.zero_grad()
-        y_hat_1 = generator(xs, noise_1)  # for updating generator
+        y_hat_1 = generator(xs, noise_1, n_next)  # for updating generator
         c_hat_fake_1 = discriminator(xs, y_hat_1)  # classify fake samples
 
         # ********** Variety loss ************
@@ -284,25 +169,29 @@ def train(train_loader_):
         # gen_loss_fooling = discriminationLoss(c_hat_fake_2, Variable(torch.ones(batch_size, 1, 1).cuda()))
         gen_loss_fooling = bce_loss(c_hat_fake_1, (torch.ones(batch_size, 1, 1) * random.uniform(0.7, 1.2)).cuda())
 
-        gen_loss_gt = groundTruthLoss(y_hat_1, ys) / n_next
+        loss_gt = lambda_l2_loss * groundTruthLoss(y_hat_1, ys) / n_next
+        gen_loss_gt += loss_gt.item()
         # print('L2 loss = ', gen_loss_gt.item())
-        gen_loss = (gen_loss_gt * lambda_l2_loss) + (gen_loss_fooling * generator.use_noise * lambda_dc_loss)
+        gen_loss = loss_gt + (gen_loss_fooling * generator.use_noise * lambda_dc_loss)
 
         gen_loss.backward()
         g_optimizer.step()
 
-        gen_loss_acc += gen_loss.item()
+        gen_total_loss_accum += gen_loss.item()
 
-    gen_loss_acc /= i
+    gen_total_loss_accum /= i
+    gen_loss_gt /= i
     dcr_loss_fake /= i
     dcr_loss_real /= i
 
-    print('epoch [%3d/%d], Generator Loss: %.6f , Gen Error: %.6f || Dis Loss: Fake= %5f, Real= %.5f'
-          % (0, n_epochs, gen_loss_fooling.item(), gen_loss_gt * lambda_l2_loss, dcr_loss_fake, dcr_loss_real))
+    print('Gen L2 Error: %.6f || Dis Loss: Fake= %5f, Real= %.5f'
+          % (gen_loss_gt, 0, 0))
+
+    return gen_loss_gt
 
 
 # ====================== T E S T =======================
-def evaluate(peds):
+def evaluate_GAN(peds):
     running_loss = 0
     running_cntr = 0
 
@@ -312,30 +201,28 @@ def evaluate(peds):
             x = ped_i[t - n_past:t, 0:n_inp_features].view(1, n_past, -1)
 
             y = (ped_i[t:t + n_next, 0:2] - x[0, -1, 0:2]).view(n_next, 2)
-            y_hat = generator(x, torch.rand(1, noise_vec_len)).view(n_next, 2)
+            y_hat = generator(x, torch.rand(1, noise_vec_len), n_next).view(n_next, 2)
 
             loss = groundTruthLoss(y_hat, y)
             running_loss += loss.item()
             running_cntr += 1
-    test_loss = running_loss / running_cntr
+    test_loss = running_loss / (running_cntr+eps)
     print("Test loss = ", np.math.sqrt(test_loss) / scale.sx)
 
 
-v_lstm = PredictorLSTM(4, 8, 128, num_layers=1)
-v_lstm.load_state_dict(torch.load('./models/v-lstm.pt'))
-
-GRID_SIZE = [129, 129]
-Nch = 3
-center = np.floor([GRID_SIZE[0] / 2, GRID_SIZE[1] / 2]).astype(int)
-PIX_VALUE = 200
-def build_teom(yi_hat, Y_i_hats, ped_id=0, start_t=0):
+def get_teom(yi_hat, Y_i_hats, ped_id=0, start_t=0):
     # teom_mats = np.empty((0, GRID_SIZE, GRID_SIZE, Nch))
+    GRID_SIZE = [129, 129]
+    Nch = 3
+    center = np.floor([GRID_SIZE[0] / 2, GRID_SIZE[1] / 2]).astype(int)
+    PIX_VALUE = 200
+
     teom_mats = []
     n_frames = yi_hat.shape[0]
     n_others = Y_i_hats.shape[0]
     n_samples = K
     goal = yi_hat[-1, :]
-    gif_writer = imageio.get_writer(out_dir + "teom_x%d_%03d_%02d.gif" % (GRID_SIZE[0], ped_id, start_t), mode='I')
+    gif_writer = imageio.get_writer(out_dir + "%03d_%02d_%dx%d.gif" % (ped_id, start_t, GRID_SIZE[0], GRID_SIZE[1]), mode='I')
     for t in range(n_frames):
         goal_vec = goal - yi_hat[t, :]
         if t == n_frames - 1:
@@ -346,7 +233,7 @@ def build_teom(yi_hat, Y_i_hats, ped_id=0, start_t=0):
 
         # Creating the Grids (Centered on the agent)
         cartesian_grid = np.zeros((GRID_SIZE[0], GRID_SIZE[1], Nch), dtype="uint8")
-        cartesian_grid[center[0], center[1], 0] = 255
+        cartesian_grid[center[0], center[1], 1] = 255
 
         rotated_goal = np.matmul(rot_matrix, goal_vec)
         if abs(rotated_goal[0]) >= 1: rotated_goal = rotated_goal / rotated_goal[0]
@@ -360,11 +247,11 @@ def build_teom(yi_hat, Y_i_hats, ped_id=0, start_t=0):
                 th = atan2(rot_y, rot_x)
                 # polar_loc = np.array([r, th])
 
-                if r > 1: continue
+                if r >= 1: continue
 
                 rot_coord = np.array([round((rot_x + 1) * center[0]), round((rot_y + 1) * center[1])]).astype(int)
-                cartesian_grid[rot_coord[0], rot_coord[1], 0] = min(255, cartesian_grid[rot_coord[0], rot_coord[1], 0] + PIX_VALUE/K)  # * approach_rate[j]
-                cartesian_grid[rot_coord[0], rot_coord[1], 1] = min(255, cartesian_grid[rot_coord[0], rot_coord[1], 1] + PIX_VALUE/K)  # * DCAs[j]
+                new_value = min(255, cartesian_grid[rot_coord[0], rot_coord[1], 0] + PIX_VALUE/K)
+                cartesian_grid[rot_coord[0], rot_coord[1], 0] = new_value  # * approach_rate[j]
 
 
                 # polar_coord_0 = int(round(r * (GRID_SIZE[0] - 1) / sqrt(2)))
@@ -383,17 +270,12 @@ def build_teom(yi_hat, Y_i_hats, ped_id=0, start_t=0):
 K = 100  # Number of samples
 disp = FakeDisplay(data_dir)
 
-# mapfile = os.path.join(data_dir, "map.png")
-Hfile = os.path.join(data_dir, "H.txt")
-H = np.loadtxt(Hfile)
-Hinv = np.linalg.inv(H)
-
-
+actual_len = 12
 def build_teom_dataset(peds, time_data, samples_mode, interactive=False):
     for ii in range(0, len(peds), 1):
         ped_i_tensor = torch.FloatTensor(peds[ii]).cuda()
-        for t1_ind_i in range(n_past, ped_i_tensor.size(0) - n_next + 1, n_past):
-            Y_hat = np.empty((0, K, n_next, 2))
+        for t1_ind_i in range(n_past, ped_i_tensor.size(0) - n_next + 1, 4):
+            Y_hat = np.empty((0, K, actual_len, 2))
 
             ts = time_data[ii][t1_ind_i - n_past]
             t0 = time_data[ii][t1_ind_i - 1]
@@ -442,8 +324,8 @@ def build_teom_dataset(peds, time_data, samples_mode, interactive=False):
                             yj_hat_np[tj, :] += torch.randn(2).data.numpy() * 0.002 * (1+tj/2) + xj_np[-1, 0:2]
 
                     else:  # samples_mode == 'gan':
-                        yj_hat = generator(xj, torch.rand(1, noise_vec_len)).view(1, n_next, 2)
-                        yj_hat_np = yj_hat.cpu().data.numpy().reshape((n_next, 2)) + xj_np[-1, 0:2]
+                        yj_hat = generator(xj, torch.rand(1, noise_vec_len), actual_len).view(1, -1, 2)
+                        yj_hat_np = yj_hat.cpu().data.numpy().reshape((-1, 2)) + xj_np[-1, 0:2]
 
                     # ==========================================
                     y_hat_j.append(yj_hat_np)
@@ -452,22 +334,19 @@ def build_teom_dataset(peds, time_data, samples_mode, interactive=False):
                     yj_hat_np = np.vstack((xj_np[-1, 0:2], yj_hat_np))
                     yj_hat_np_XY = to_image_frame(Hinv, np.hstack((scale.denormalize(yj_hat_np), np.ones((yj_hat_np.shape[0],1)))))
 
-                    if kk == 1 and len(Y_hat) == 1:
-                        plt.plot(yj_hat_np_XY[:, 0], yj_hat_np_XY[:, 1], 'bo', markersize=3, transform=rot + base, label='Prediction Sample')
-                    else:
-                        plt.plot(yj_hat_np_XY[:, 0], yj_hat_np_XY[:, 1], 'bo', markersize=3, transform=rot + base)
+                    sample_lbl = plt.plot(yj_hat_np_XY[:, 0], yj_hat_np_XY[:, 1], 'bo', markersize=3, transform=rot + base)
 
                     disp.plot_path(scale.denormalize(yj_hat_np[:, 0:2]), jj)
-                    if kk == K:
-                        xj_np_XY = to_image_frame(Hinv, np.hstack((scale.denormalize(xj_np[:, 0:2]), np.ones((xj_np.shape[0], 1)))))
-                        plt.plot(xj_np_XY[:, 0], xj_np_XY[:, 1], 'g--', transform=rot + base)
 
-                        yj_np_aug = np.vstack((np.zeros((1,2)), yj_np[:, 0:2])) + xj_np[-1, 0:2]
-                        yj_np_aug_XY = to_image_frame(Hinv, np.hstack((scale.denormalize(yj_np_aug), np.ones((yj_np_aug.shape[0],1)))))
-                        plt.plot(yj_np_aug_XY[:, 0], yj_np_aug_XY[:, 1], 'g+', transform=rot + base)
-                    # %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+                xj_np_XY = to_image_frame(Hinv, np.hstack((scale.denormalize(xj_np[:, 0:2]), np.ones((xj_np.shape[0], 1)))))
+                plt.plot(xj_np_XY[:, 0], xj_np_XY[:, 1], 'g--', transform=rot + base)
 
-                y_hat_j = np.stack(y_hat_j).reshape((1, K, n_next, 2))
+                yj_np_aug = np.vstack((np.zeros((1,2)), yj_np[:, 0:2])) + xj_np[-1, 0:2]
+                yj_np_aug_XY = to_image_frame(Hinv, np.hstack((scale.denormalize(yj_np_aug), np.ones((yj_np_aug.shape[0],1)))))
+                plt.plot(yj_np_aug_XY[:, 0], yj_np_aug_XY[:, 1], 'g+', transform=rot + base)
+                # %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+
+                y_hat_j = np.stack(y_hat_j).reshape((1, K, -1, 2))
                 Y_hat = np.vstack((Y_hat, y_hat_j))
 
                 # %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
@@ -480,25 +359,28 @@ def build_teom_dataset(peds, time_data, samples_mode, interactive=False):
             xi_np = xi.cpu().data.numpy().reshape((n_past, n_inp_features))
             yi = (ped_i_tensor[t1_ind_i:t1_ind_i + n_next, 0:2] - xi[0, -1, 0:2]).view(1, n_next, 2)
             yi_np = yi.cpu().data.numpy().reshape((n_next, 2))
-            ci_real = discriminator(xi, yi)
-            yi_hat = v_lstm(xi)
+            # ci_real = discriminator(xi, yi)
             # yi_hat = generator(xi, torch.rand(1, noise_vec_len)).view(1, n_next, 2)
-            yi_hat = yi_hat.cpu().data.numpy().reshape((n_next, 2)) + xi_np[-1, 0:2]
+            # yi_hat = v_lstm(xi)
+            # yi_hat = yi_hat.cpu().data.numpy().reshape((n_next, 2)) + xi_np[-1, 0:2]
+            yi_hat = cv_model.predict(xi_np, actual_len)
             yi_hat_np = np.vstack((xi_np[-1, 0:2], yi_hat))
 
             # ======== Build TEOM Maps =========
-            # ==================================
-            teom_mats = build_teom(yi_hat, Y_hat, ii, t1_ind_i)
+            teom_mats = get_teom(yi_hat, Y_hat, ii, t1_ind_i)
             out_filename = os.path.join(out_dir, '%03d_%02d.npz' % (ii, t1_ind_i))
+            # ==================================
 
-            # preparing target vectors for training: delta-velocity w.r.t last velocity of agent
+            # preparing target vectors for training:
+            #              delta-velocity w.r.t last velocity of agent
+            # =================================================================================
             target = []
             base_v = xi_np[-1, 2:4]  # last instant vel
             base_v = (xi_np[-1, 0:2] - xi_np[0, 0:2]) / (len(xi_np) - 1)  # observation avg vel
             # base_v = unit(base_v)  # it could be tested
             [_, base_theta] = cart2pol(base_v[0], base_v[1])
-            for tf in range(n_next):
-                dp_t = yi_np[tf, 0:2]  # - xi_np[-1, 0:2]
+            for tt in range(len(yi_np)):
+                dp_t = yi_np[tt, 0:2]  # - xi_np[-1, 0:2]
                 [mag, abs_theta] = cart2pol(dp_t[0], dp_t[1])
                 rel_theta = abs_theta - base_theta
                 if rel_theta > np.pi:
@@ -507,11 +389,8 @@ def build_teom_dataset(peds, time_data, samples_mode, interactive=False):
                     rel_theta += 2 * np.pi
                 target.append(np.array([mag, rel_theta]))
 
-            np.savez(out_filename,
-                     teom=teom_mats,
-                     obsv=xi_np,
-                     target=target,
-                     gt=(ped_i_tensor[t1_ind_i:t1_ind_i + n_next, 0:2]).cpu().data.numpy().reshape((n_next, -1)))
+            np.savez(out_filename, teom=teom_mats, obsv=xi_np, target=target,
+                     gt=(ped_i_tensor[t1_ind_i:t1_ind_i + n_next, 0:2]).cpu().data.numpy().reshape((-1, 2)))
             print('Saving data to %s' % out_filename)
 
             # =========== Const-Vel Prediction ========
@@ -524,23 +403,23 @@ def build_teom_dataset(peds, time_data, samples_mode, interactive=False):
 
             # ========================================
             yi_cv_XY = to_image_frame(Hinv, np.hstack((scale.denormalize(yi_cv), np.ones((yi_cv.shape[0],1)))))
-            plt.plot(yi_cv_XY[:, 0], yi_cv_XY[:, 1], 'c--', transform=rot + base, label='Const-Vel Prediction')
+            cv_lbl = plt.plot(yi_cv_XY[:, 0], yi_cv_XY[:, 1], 'c--', transform=rot + base, label='Const-Vel Prediction')
             # plt.plot(yi_cv[:, 0], yi_cv[:, 1], 'c--')
 
-            yi_hat_np_XY = to_image_frame(Hinv, np.hstack((scale.denormalize(yi_hat_np), np.ones((yi_hat_np.shape[0], 1)))))
-            plt.plot(yi_hat_np_XY[:, 0], yi_hat_np_XY[:, 1], 'y--', transform=rot + base, label='Prior Prediction')
+            # yi_hat_np_XY = to_image_frame(Hinv, np.hstack((scale.denormalize(yi_hat_np), np.ones((yi_hat_np.shape[0], 1)))))
+            # plt.plot(yi_hat_np_XY[:, 0], yi_hat_np_XY[:, 1], 'y--', transform=rot + base, label='Const-Vel Prediction')
             # plt.plot(yi_hat_np[:, 0], yi_hat_np[:, 1], 'y--')
 
             xi_np_XY = to_image_frame(Hinv, np.hstack((scale.denormalize(xi_np[:, 0:2]), np.ones((xi_np.shape[0],1)))))
-            plt.plot(xi_np_XY[:, 0], xi_np_XY[:, 1], 'g--', transform=rot + base, label='Observation')
+            obsv_lbl = plt.plot(xi_np_XY[:, 0], xi_np_XY[:, 1], 'g--', transform=rot + base, label='Observation')
 
             xi_np_XY = to_image_frame(Hinv, np.hstack((scale.denormalize(xi_np[:, 0:2]), np.ones((xi_np.shape[0],1)))))
-            plt.plot(xi_np_XY[-1, 0], xi_np_XY[-1, 1], 'mo', markersize=7, transform=rot + base, label='Cur Position')
+            curpos_lbl = plt.plot(xi_np_XY[-1, 0], xi_np_XY[-1, 1], 'mo', markersize=7, transform=rot + base, label='Cur Position')
             # plt.plot(xi_np[-1, 0], xi_np[-1, 1], 'mo', markersize=7, label='Start Point')
 
             tmp_yi_np = np.vstack((np.zeros((1,2)), yi_np[:, 0:2])) + xi_np[-1, 0:2]
             yi_np_aug_XY = to_image_frame(Hinv, np.hstack((scale.denormalize(tmp_yi_np), np.ones((tmp_yi_np.shape[0],1)))))
-            plt.plot(yi_np_aug_XY[:, 0], yi_np_aug_XY[:, 1], 'r+', transform=rot + base, label='Ground Truth')
+            gt_lbl = plt.plot(yi_np_aug_XY[:, 0], yi_np_aug_XY[:, 1], 'r+', transform=rot + base, label='Ground Truth')
             # plt.plot(tmp_yi_np[:, 0], tmp_yi_np[1, :], 'r+')
 
             # plt.xlim((0, 1))
@@ -551,7 +430,7 @@ def build_teom_dataset(peds, time_data, samples_mode, interactive=False):
             plt.ylim((-480, 0))
 
             fig = plt.gcf()
-            fig.set_size_inches(16, 12)
+            fig.set_size_inches(16, 11.9)
             plt.legend()
             fig_name = '%03d_%02d.svg' % (ii, t1_ind_i)
             print('Saving figure: [%s] ...' % fig_name)
@@ -567,28 +446,34 @@ def build_teom_dataset(peds, time_data, samples_mode, interactive=False):
 
 def train_loop(train_loader_, test_peds_, load=True, save=True):
     print("Train the model ...")
+    min_train_loss = 400
     if load:
-        generator.load_state_dict(torch.load('./models/gan-g.pt'))
-        discriminator.load_state_dict(torch.load('./models/gan-d.pt'))
+        generator.load_state_dict(torch.load('./models/seq-gen1.pt'))
+        discriminator.load_state_dict(torch.load('./models/real-gan2-d.pt'))
     for epoch in range(1, n_epochs + 1):
         adjust_learning_rate(d_optimizer, epoch)
         adjust_learning_rate(g_optimizer, epoch)
 
-        train(train_loader_)
+        print('Training Epoch [%3d/%d] ...' % (epoch, n_epochs))
+
+        train_loss = train_GAN(train_loader_)
+        if save and train_loss < min_train_loss:
+            min_train_loss = train_loss
+            torch.save(generator.state_dict(), './models/seq-gen1.pt')
+            torch.save(discriminator.state_dict(), './models/real-gan2-d.pt')
         if epoch % test_interval == 0:
-            if save:
-                torch.save(generator.state_dict(), './models/gan-g.pt')
-                torch.save(discriminator.state_dict(), './models/gan-d.pt')
             with torch.no_grad():
-                evaluate(test_peds_)
+                evaluate_GAN(test_peds_)
 
 
-def generate_samples(train_peds_, samples_mode):
+def generate_samples(peds_, time_data_, samples_mode, interactive=False):
+    generator.load_state_dict(torch.load('./models/seq-gen1.pt'))
+    discriminator.load_state_dict(torch.load('./models/gan-d.pt'))
     with torch.no_grad():
         # evaluate()
         print("Don't forget to correct here and test the test set!")
         K = 100
-        build_teom_dataset(train_peds_, train_time_data, samples_mode.lower(), interactive=False)
+        build_teom_dataset(peds_, time_data_, samples_mode.lower(), interactive=interactive)
 
 
 def build_big_file(data_dir, output_file):
@@ -638,7 +523,16 @@ def build_big_file(data_dir, output_file):
 
 
 # ----------------- M A I N   C O D E S ----------------------
-# train_loader, train_peds, test_peds = prepare_data(smooth=True)
-# train_loop(train_loader, test_peds, load=True, save=True)
-# generate_samples(test_peds, 'gt')
-build_big_file('../teom/eth', '../teom/eth_big_file.npz')
+test_fold = 5
+data_dir = '../data/eth'
+out_dir = '../teom/eth_gan_new_t%d/' % test_fold
+
+# mapfile = os.path.join(data_dir, "map.png")
+Homography_file = os.path.join(data_dir, "H.txt")
+Hinv = np.linalg.inv(np.loadtxt(Homography_file))
+train_loader_, train_peds, test_peds, train_time_data, test_time_data = \
+    prepare_training_data(smooth_train_set=True, n_fold=5, test_fold=test_fold)
+scale = parser.scale
+# train_loop(train_loader_, test_peds, load=True, save=True)
+generate_samples(test_peds, test_time_data, samples_mode='gan', interactive=False)
+build_big_file(out_dir, '../teom/eth_big_file.npz')
