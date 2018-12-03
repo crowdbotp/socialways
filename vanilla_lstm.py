@@ -7,102 +7,29 @@ import matplotlib.pyplot as plt
 from matplotlib.figure import figaspect
 from torch.utils.data import DataLoader
 
+from src.math_utils import norm
 from src.parse_utils import *
 from src.learning_utils import *
 from src.kalman import MyKalman
-from src.math_utils import ConstVelModel
+from src.models import ConstVelModel, VanillaLSTM, SequentialPredictorWithVelocity
+from src.visualize import Display, FakeDisplay, to_image_frame
 
 np.random.seed(1)
 config = MyConfig(n_past=8, n_next=8)
 n_past = config.n_past
 n_next = config.n_next
-test_interval = 10
+test_interval = 50
 n_inp_features = 4  # x, y, vx, vy
 n_out_features = 2
 
 train_rate = 0.8
 learning_rate = 1e-3
 weight_decay = 4e-3
-def_batch_size = 64
+def_batch_size = 128
 n_epochs = 2000
 
 if torch.cuda.is_available():
     print("CUDA is available!")
-
-
-class PredictorLSTM(nn.Module):
-    def __init__(self, feature_size, pred_length, hidden_size_lstm, num_layers=1):
-        super(PredictorLSTM, self).__init__()
-        self.feature_size = feature_size
-        self.pred_length = pred_length
-        self.hidden_size = hidden_size_lstm
-        self.n_layers = num_layers
-        self.is_blstm = False
-
-        hidden_size_2 = 64
-        hidden_size_3 = 64
-
-        # Initialize Layers
-        self.lstm = nn.LSTM(input_size=feature_size, hidden_size=hidden_size_lstm,
-                            num_layers=num_layers, batch_first=True).cuda()
-        self.fc_out = nn.Linear(hidden_size_3, pred_length * 2).cuda()
-
-        # Hidden Layers
-        self.fc_1 = nn.Sequential(nn.Linear(hidden_size_lstm * (1 + self.is_blstm), hidden_size_2)
-                                  , nn.LeakyReLU(0.2)).cuda()
-
-        self.fc_2 = nn.Sequential(nn.Linear(hidden_size_2, hidden_size_3),
-                                  nn.LeakyReLU(0.1)).cuda()
-
-        # it gives out just one location
-        # self.one_out = nn.Linear(hidden_size_3, 2).cuda()
-
-        #self.lstm.weight_hh_l0.data.fill_(0)
-        nn.init.xavier_uniform_(self.fc_out.weight)
-
-        # self.linear = nn.Linear(hidden_size_lstm, hidden_size_lstm).cuda()
-        # self.sigmoid = nn.Sigmoid().cuda()
-        # self.relu = nn.ReLU().cuda()
-
-        self.loss_func = nn.MSELoss()
-        # self.optimizer = torch.optim.Adam(self.parameters(), lr=learning_rate, weight_decay=weight_decay)
-        self.optimizer = torch.optim.Adam(self.parameters(), lr=learning_rate)
-
-    def init_state(self, minibatch_size=1):
-        # The axes semantics are (num_layers, minibatch_size, hidden_dim)
-        return (torch.zeros(self.n_layers, minibatch_size, self.hidden_size).cuda(),
-                torch.zeros(self.n_layers, minibatch_size, self.hidden_size).cuda())
-
-    # ============ Sequence Prediction ============
-    def forward(self, x):
-        batch_size = x.size(0)
-        self.hidden = self.init_state(batch_size)
-        (y, _) = self.lstm(x, self.hidden)
-        y = y[:, -1, :].view(batch_size, 1, -1)  # just keep the last output: (batch_size, 1, H)
-        # y = self.linear(y)
-        # y = self.sigmoid(y)
-        # y = self.relu(y)
-        y = self.fc_1(y)
-        # y = self.fc_2(y)
-        y = self.fc_out(y.view(batch_size, -1)).view(batch_size, -1, 2)
-        return y
-
-    # ============= GOAL Prediction ===============
-    # def forward(self, x):
-    #     batch_size = x.size(0)
-    #     self.hidden = self.init_state(batch_size)
-    #     # for xi in x:
-    #     #     xi = xi.view(1, 1, self.feature_size)
-    #     #     y, self.hidden = self.lstm(xi, self.hidden)
-    #
-    #     (y, _) = self.lstm(x, self.hidden)  # encode the input
-    #     y = y[:, -1, :].view(batch_size, 1, -1)  # just keep the last output: (batch_size, 1, H)
-    #
-    #     y = self.linear(y)
-    #     # y = self.sigmoid(y)
-    #     # y = self.relu(y)
-    #     y = self.one_out(y)
-    #     return y
 
 
 def update(model, y_list, y_hat_list):
@@ -167,9 +94,33 @@ def train(model, train_loader):
     return running_loss / running_cntr
 
 
+cv_model = ConstVelModel()
+def test_cv(ped_data):
+    ade_err_accum = 0
+    fde_err_accum = 0
+    err_counter = 0
+    for ii in range(len(ped_data)):
+        ped_i_tensor = torch.FloatTensor(ped_data[ii])
+        for t in range(n_past, ped_i_tensor.size(0) - n_next + 1, n_past):
+            x = ped_i_tensor[t-n_past:t, 0:n_inp_features]
+            x_np = x.cpu().data.numpy().reshape((n_past, n_inp_features))[:, 0:2]
+
+            y = (ped_i_tensor[t:t+n_next, 0:2]).view(n_next, 2)
+            y_np = y.cpu().data.numpy().reshape((n_next, 2))
+            y_hat = cv_model.predict(x_np, n_next)
+
+            loss = norm(y_np - y_hat, axis=1)
+            ade_err_accum += np.mean(loss)
+            fde_err_accum += loss[-1]
+
+            err_counter += 1
+    return ade_err_accum/err_counter, fde_err_accum/err_counter
+
+
 def test(model, ped_data):
-    running_loss = 0
-    running_cntr = 0
+    ade_err_accum = 0
+    fde_err_accum = 0
+    err_counter = 0
     cv_model = ConstVelModel()
     with torch.no_grad():
         for ii in range(len(ped_data)):
@@ -180,13 +131,11 @@ def test(model, ped_data):
                 y = (ped_i_tensor[t:t+n_next, 0:2] - x[-1, 0:2]).view(n_next, 2)
                 y_hat = model(x.view(1, -1, n_inp_features)).view(n_next, 2)
 
-                # Goal Prediction
-                # y = (ped_i_tensor[t+n_next-1, 0:2] - x[-1, 0:2]).view(1, 2)
-                # y_hat = model(x).view(1, 2)
-
                 loss = model.loss_func(y_hat, y)
-                running_loss += loss.item()
-                running_cntr += 1
+                ade_err_accum += np.sqrt(loss.item())
+                fde_err_accum += torch.dist(y[-1, 0:2], y_hat[-1, 0:2])
+
+                err_counter += 1
 
         # Display Results
         for ii in range(5, len(ped_data), 15):
@@ -199,13 +148,6 @@ def test(model, ped_data):
                 y_hat = model(x.view(1, -1, n_inp_features)).view(n_next, 2)
                 y_np = y.cpu().data.numpy().reshape((n_next, 2))
                 y_hat_np = np.vstack((np.array([0, 0]), y_hat.cpu().data.numpy().reshape((n_next, 2)))) + x_np[-1, 0:2]
-
-                # Goal Prediction
-                # y = (ped_i_tensor[t:t + n_next, 0:2] - x[-1, 0:2]).view(n_next, 2)
-                # y_hat = model(x.view(1, -1, n_inp_features)).view(1, 2)
-                # y_np = y.cpu().data.numpy().reshape((n_next, 2))
-                # y_hat_np = np.vstack((np.array([0, 0]), y_hat.cpu().data.numpy().reshape((1, 2)))) + x_np[-1, 0:2]
-
                 y_cv = np.vstack((x_np[-1, 0:2], cv_model.predict(x_np)))
 
                 plt.plot(x_np[:, 0], x_np[:, 1], 'y--')
@@ -218,16 +160,102 @@ def test(model, ped_data):
             plt.xlim((0, 1))
             # plt.show()
 
+    return ade_err_accum/err_counter, fde_err_accum/err_counter
 
-    avg_loss = running_loss/running_cntr
-    return avg_loss
+dt = 10
+def generate_nice_samples():
+    disp = FakeDisplay('../data/zara01')
+    Homography_file = os.path.join('../data/zara01', "H.txt")
+    Hinv = np.linalg.inv(np.loadtxt(Homography_file))
+    t0 = time_data[0][0]
+    t0 = 961-dt
+    for t in range(t0, 10000, dt):
+        disp.grab_frame(t)
+
+        iis = []
+        for i in range(len(pos_data)):
+            # for i in [59, 58]:
+            t1_ind = np.array(np.where(time_data[i] == t))
+            ts_ind = np.array(np.where(time_data[i] == t-n_past*dt))
+            te_ind = np.array(np.where(time_data[i] == t+(n_next-1)*dt))
+
+            if t1_ind.size == 0 or ts_ind.size == 0 or te_ind.size == 0:
+                continue
+
+            t1_ind = t1_ind[0][0]
+            ts_ind = ts_ind[0][0]
+            te_ind = te_ind[0][0]
+
+            xi = pos_data[i][ts_ind:t1_ind]
+            xi_smooth = pos_data[i][ts_ind:t1_ind]
+            yi = pos_data[i][t1_ind:te_ind+1]
+
+            # teom_i = torch.FloatTensor(test_teom[0]).cuda().unsqueeze(0)
+            # gt_i = test_gt[0]
+            # obsv_i = test_obsv[i]
+            # target_i = test_target[i]
+            xi_tf = torch.FloatTensor(xi_smooth).cuda().unsqueeze(0)
+            # pred, risk = cnn_model(xi_tf, teom_i, n_next, False)
+            pred = model(xi_tf) + xi_tf[0, -1, :]
+            pred = pred.cpu().data.numpy().reshape((n_next, 2))
+            kf = MyKalman(1 / parser.actual_fps, n_iter=5)
+            pred, _ = kf.smooth(pred)
+            pred_cv = cv_model.predict(xi, n_next)
+
+            # Xi = to_image_frame(Hinv, np.hstack((scale.denormalize(xi), np.ones((n_next, 1)))))
+            # Xi_lbl, = plt.plot(Xi[:, 0], Xi[:, 1], 'g+')
+            #
+            # Yi = to_image_frame(Hinv, np.hstack((scale.denormalize(yi), np.ones((n_next, 1)))))
+            # Yi_lbl, = plt.plot(Yi[:, 0], Yi[:, 1], 'r+')
+
+            xi_lbl, = plt.plot(xi[:, 0], xi[:, 1], 'g')
+
+            # yi_lbl, = plt.plot(yi[:, 0], yi[:, 1], 'g--')
+            # yhat_lbl, = plt.plot(pred[:, 0], pred[:, 1], 'b--')
+            # y_cv_lbl, = plt.plot(pred_cv[:, 0], pred_cv[:, 1], 'y--')
+            plt.text(xi[-1, 0], xi[-1, 1], '%d' %i)
+            iis.append(i)
+
+            disp.plot_ped(scale.denormalize(xi[-1, 0:2]))
+            disp.plot_path(scale.denormalize(xi[:, 0:2]), i, 'g--')
+            disp.plot_path(scale.denormalize(yi[:, 0:2]), i, 'g.')
+            disp.plot_ped()
+            if i ==20:
+                yi_lbl, = plt.plot(yi[:, 0], yi[:, 1], 'g--')
+                yhat_lbl, = plt.plot(pred[:, 0], pred[:, 1], 'b--')
+                y_cv_lbl, = plt.plot(pred_cv[:, 0], pred_cv[:, 1], 'y--')
+                cur_pos_lbl = plt.plot(xi[-1, 0], xi[-1, 1], 'ro')
+
+                # disp.plot_path(scale.denormalize(pred[:, 0:2]/20), i, 'b.')
+                # disp.plot_path(scale.denormalize(pred_cv[:, 0:2]/20), i, 'y.')
+            elif i in [15, 16, 18]:
+                for k in range(100):
+                    sample_k = generator(xi_tf, 0, n_next) + xi_tf[0, -1, :2]
+                    sample_k = sample_k.cpu().data.numpy().reshape((-1, 2))
+                    kf = MyKalman(1 / parser.actual_fps, n_iter=5)
+                    sample_k, _ = kf.smooth(sample_k)
+                    sam_lbl, = plt.plot(sample_k[:, 0], sample_k[:, 1], 'r')
+                    disp.plot_path(scale.denormalize(sample_k), i, 'r--')
+        # disp.show('frame')
+
+
+        if len(iis) > 2:
+            plt.legend((xi_lbl, yi_lbl, yhat_lbl, y_cv_lbl), ('obsv', 'gt', 'pred', 'cv'))
+            plt.gcf().set_size_inches(16, 16)
+            # plt.xlim([0, 1])
+            # plt.ylim([0., 1.])
+            print('t = %d, ids = ' %t, iis)
+            plt.show()
+            # return 0
+        plt.clf()
 
 
 if __name__ == '__main__':
+
     # parser = SeyfriedParser()
     # pos_data, vel_data, time_data = parser.load('../data/sey01.sey')
     parser = BIWIParser()
-    pos_data, vel_data, time_data = parser.load('../data/eth/eth.wap')
+    pos_data, vel_data, time_data = parser.load('../data/zara01/obsmat.txt')
     scale = parser.scale
 
     n_ped = len(pos_data)
@@ -248,10 +276,13 @@ if __name__ == '__main__':
         vel_data[i] = scale.normalize(vel_data[i], shift=False)
         _pv_i = np.hstack((pos_data[i], vel_data[i]))
         data_set.append(_pv_i)
+        time_data[i] = time_data[i].astype(int)
     train_peds = np.array(data_set[:train_size])
     test_peds = np.array(data_set[train_size:])
 
-    model = PredictorLSTM(feature_size=n_inp_features, pred_length=n_next, hidden_size_lstm=128, num_layers=1)
+    model = VanillaLSTM(feature_size=2, pred_length=n_next, hidden_size_lstm=128, num_layers=1)
+    generator = SequentialPredictorWithVelocity()
+    generator.load_state_dict(torch.load('./models/G0.pt'))
 
     dataset_x = []
     dataset_y = []
@@ -269,8 +300,10 @@ if __name__ == '__main__':
     train_data = torch.utils.data.TensorDataset(dataset_x_tensor, dataset_y_tensor)
     train_loader = DataLoader(train_data, batch_size=def_batch_size, shuffle=True, num_workers=4)
     min_test_err = 25
+    train_loss = 0
 
     print("Train the model ...")
+    model.load_state_dict(torch.load('./models/v-lstm.pt'))
     for epoch in range(1, n_epochs+1):
         lr = 0.001
         if epoch > 1000:
@@ -291,17 +324,33 @@ if __name__ == '__main__':
             param_group["lr"] = lr
 
         # train_loss = train(model, train_set)
-        train_loss = train(model, train_loader)
-
+        # train_loss = train(model, train_loader)
         train_loss = math.sqrt(train_loss) / (scale.sx)
+        train_loss = math.sqrt(train_loss) / (scale.sx)
+
+        if train_loss < min_test_err:
+            min_test_err = train_loss
+            torch.save(model.state_dict(), './models/v-lstm.pt')
+
         print('******* Epoch: [%3d/%d], Loss: %.9f **********' % (epoch, n_epochs, train_loss))
         if epoch % test_interval == 0:
-            test_loss = test(model, test_peds)
-            test_loss = math.sqrt(test_loss) / (scale.sx)
-            if test_loss < min_test_err:
-                min_test_err = test_loss
-                torch.save(model.state_dict(), './models/v-lstm.pt')
-            print('====TEST====> MSE Loss:%.9f' % test_loss)
+            test_ade, test_fde = test(model, test_peds)
+
+
+            generate_nice_samples()
+
+            # n_next = 8
+            # test_ade, test_fde = test_cv(test_peds)
+            # test_ade = test_ade / (scale.sx)
+            # test_fde = test_fde / (scale.sx)
+            # print('TEST==[%d/%d] ADE=%.6f  | FDE=%.6f' % (n_past, n_next, test_ade, test_fde))
+            #
+            # n_next = 12
+            # test_ade, test_fde = test_cv(test_peds)
+            # test_ade = test_ade / (scale.sx)
+            # test_fde = test_fde / (scale.sx)
+            # print('TEST==[%d/%d] ADE=%.6f  | FDE=%.6f' % (n_past, n_next, test_ade, test_fde))
+            # exit(1)
 
 
 

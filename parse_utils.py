@@ -65,12 +65,16 @@ class BIWIParser:
         self.scale = Scale()
         self.all_ids = list()
         self.actual_fps = 0.
+        self.delimit = ' '
 
     def load(self, filename, down_sample=1):
         pos_data_dict = dict()
         vel_data_dict = dict()
         time_data_dict = dict()
         self.all_ids.clear()
+
+        if 'zara' in filename:
+            self.delimit = '\t'
 
         # check to search for many files?
         file_names = list()
@@ -89,9 +93,9 @@ class BIWIParser:
                 content = data_file.readlines()
                 id_list = list()
                 for row in content:
-                    row = row.split(' ')
+                    row = row.split(self.delimit)
                     while '' in row: row.remove('')
-                    if len(row) != 8: continue
+                    if len(row) < 8: continue
 
                     ts = float(row[0])
                     id = round(float(row[1]))

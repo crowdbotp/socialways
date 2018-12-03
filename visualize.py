@@ -32,7 +32,7 @@ class Display:
         destfile = os.path.join(datadir, "destinations.txt")
 
 
-        self.cap = cv2.VideoCapture(os.path.join(datadir, 'eth.avi'))
+        self.cap = cv2.VideoCapture(os.path.join(datadir, 'zara01.avi'))
         self.H = np.loadtxt(Hfile)
         self.Hinv = np.linalg.inv(self.H)
 
@@ -42,9 +42,9 @@ class Display:
         S[1, 1] = self.scale
         self.Hinv = np.matmul(np.matmul(S, self.Hinv), np.linalg.inv(S))
 
-        frames, timeframes, timesteps, agents = parse_annotations(self.Hinv, obsfile)
+        # frames, timeframes, timesteps, agents = parse_annotations(self.Hinv, obsfile)
 
-        self.obs_map = create_obstacle_map(mapfile)
+        # self.obs_map = create_obstacle_map(mapfile)
         destinations = np.loadtxt(destfile)
 
         plt.ion()
@@ -94,7 +94,7 @@ class Display:
         return False
 
     def plot_ped(self, pos=(0, 0), pid=-1, color=(0, 0, 192)):
-        pix_loc = to_pixels(self.Hinv, [pos[0], pos[1], 1.])
+        pix_loc = to_pixels(self.Hinv, np.array([pos[0], pos[1], 1.]))
         cv2.circle(self.output, pix_loc, 5, color, 1, cv2.LINE_AA)
         if pid >= 0:
             cv2.putText(self.output, '%d' % pid, pix_loc, cv2.FONT_HERSHEY_SCRIPT_SIMPLEX, 0.5, (0,0,200), 2)
@@ -114,7 +114,7 @@ class Display:
 
         for i in range(len(path)):
             pos_i = path[i, 0:2]
-            pix_loc = to_pixels(self.Hinv, [pos_i[0], pos_i[1], 1.])
+            pix_loc = to_pixels(self.Hinv, np.array([pos_i[0], pos_i[1], 1.]))
 
             if '--' in args:
                 if i != 0:
