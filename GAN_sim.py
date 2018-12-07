@@ -5,7 +5,8 @@ from torch.utils.data import TensorDataset, DataLoader
 import random
 import numpy as np
 import matplotlib.pyplot as plt
-
+from tqdm import trange
+import os.path
 
 # ==== Generate sim dataset =====
 n_past = 2
@@ -16,15 +17,16 @@ samples = []
 for ii in range(128):
     p0 = [-1, 1]
     p1 = [1, 1 + (ii % 2) * 0.0]
+    r = np.random.randn(1) / 50
     if ii % n_modes == 0:
-        p2 = [2, 0]
-        p3 = [3, 0]
+        p2 = [2, 0+r]
+        p3 = [3, 0+r]
     elif ii % n_modes == 1:
-        p2 = [2, 2]
-        p3 = [3, 2]
-    elif ii % n_modes == 2:
-        p2 = [2, 3]
-        p3 = [3, 3]
+        p2 = [2, 2+r]
+        p3 = [3, 2+r]
+    else: # if ii % n_modes == 2:
+        p2 = [2, 3+r]
+        p3 = [3, 3+r]
 
     samples.append(np.array([p0, p1, p2, p3]))
 
@@ -33,9 +35,11 @@ samples = np.array(samples)
 noise_vec_len = 1
 code_vec_len = 1
 samples = samples / 5
+out_dir = "../gan_out"
+os.makedirs(out_dir, exist_ok=True)
 
 train_data = TensorDataset(torch.FloatTensor(samples[:, :n_past]),
-                                            torch.FloatTensor(samples[:, n_past:]))
+                           torch.FloatTensor(samples[:, n_past:]))
 train_loader = DataLoader(train_data, batch_size=n_samples, shuffle=True, num_workers=1)
 
 
@@ -69,7 +73,10 @@ class Generator(nn.Module):
         self.noise_encoder = fc_block(noise_vec_len, hidden_size)    .cuda()
         self.code_encoder = fc_block(code_vec_len, hidden_size).cuda()
         self.fc_out = nn.Sequential(fc_block(hidden_size * 3, hidden_size),
-                                    fc_block(hidden_size, n_next * 2)).cuda()
+                                    fc_block(hidden_size, hidden_size),
+                                    fc_block(hidden_size, hidden_size),
+                                    # fc_block(hidden_size, hidden_size),
+                                    nn.Linear(hidden_size, n_next * 2)).cuda()
 
     def forward(self, x, z, c):
         batch_size = x.size(0)
@@ -88,7 +95,14 @@ class Discriminator(nn.Module):
         hidden_size = 32
         self.obsv_encoder = fc_block(n_past * 2, hidden_size).cuda()
         self.pred_encoder = fc_block(n_next * 2, hidden_size).cuda()
-        self.fc_out_label = fc_block(hidden_size + hidden_size, hidden_size).cuda()
+        self.some_layers = nn.Sequential(fc_block(hidden_size + hidden_size, hidden_size),
+                                         fc_block(hidden_size, hidden_size),
+                                         fc_block(hidden_size, hidden_size),
+                                         fc_block(hidden_size, hidden_size)).cuda()
+        self.classifier = nn.Linear(hidden_size, 1).cuda()
+        self.code_estimator = nn.Linear(hidden_size, code_vec_len).cuda()
+
+        # self.sigmoid = nn.Sigmoid()
 
     def forward(self, x, y):
         batch_size = x.size(0)
@@ -96,67 +110,40 @@ class Discriminator(nn.Module):
         yh = self.pred_encoder(y.view(batch_size, -1).cuda())
 
         hh = torch.cat([xh, yh], dim=1)
-        label = self.fc_out_label(hh)
-        # code = self.fc_out_code(hh)
-        # out = torch.cat([label, code], dim=1)
-        return label  # out
+        hh = self.some_layers(hh)
+        label = self.classifier(hh)
+        code_h = self.code_estimator(hh)
 
+        return label, code_h
 
-class Qclass(nn.Module):
-    def __init__(self):
-        super(Qclass, self).__init__()
-        hidden_size = 32
-        self.obsv_encoder = nn.Sequential(nn.Linear(n_past * 2, hidden_size),
-                                          nn.ReLU(),
-                                          nn.Linear(hidden_size, hidden_size)).cuda()
-        self.pred_encoder = nn.Sequential(nn.Linear(n_next * 2, hidden_size),
-                                          nn.ReLU(),
-                                          nn.Linear(hidden_size, hidden_size)).cuda()
+# bce_loss = nn.BCELoss()
+# def adv_loss(input_, target_):
+#     return bce_loss(input_, target_)
 
-        self.fc_out_code = nn.Linear(hidden_size + hidden_size, 1).cuda()
-
-    def forward(self, x, y):
-        batch_size = x.size(0)
-        xh = self.obsv_encoder(x.view(batch_size, -1).cuda())
-        yh = self.pred_encoder(y.view(batch_size, -1).cuda())
-
-        hh = torch.cat([xh, yh], dim=1)
-        code = self.fc_out_code(hh)
-        return code
-
-
-
-
-
-def bce_loss(input_, target_):
+def adv_loss(input_, target_):
     neg_abs = -input_.abs()
     _loss = input_.clamp(min=0) - input_ * target_ + (1 + neg_abs.exp()).log()
     return _loss.mean()
 
+mse_loss = nn.MSELoss()
 
 G = Generator()
 D = Discriminator()
-Q = Qclass()
-d_learning_rate = 3e-3
-g_learning_rate = 3e-3
-d_optimizer = torch.optim.Adam(D.parameters(), lr=d_learning_rate)
+g_learning_rate = 4e-4
+d_learning_rate = 4e-4
 g_optimizer = torch.optim.Adam(G.parameters(), lr=g_learning_rate)
-q_optimizer = torch.optim.Adam(Q.parameters(), lr=g_learning_rate)
-mse_loss = nn.MSELoss()
+d_optimizer = torch.optim.Adam(D.parameters(), lr=d_learning_rate)
 landa = 1000
+last_epc = -1
+last_kld = -1
 
-for epc in range(1, 100000+1):
+for epc in trange(1, 100000+1):
     d_loss_fake_sum = 0
     d_loss_real_sum = 0
     g_loss_sum = 0
     recon_loss_sum = 0
 
-    # for si in samples:
-    # x = torch.from_numpy(si[:n_past]).type(torch.FloatTensor)
-    # y = torch.from_numpy(si[n_past:]).type(torch.FloatTensor)
-
     # --- codes to train G and D together ---
-
     for _, (x, y) in enumerate(train_loader):
         bs = x.size(0)  # batch size
         z = Variable(torch.FloatTensor(torch.randn(bs, noise_vec_len)), requires_grad=False).cuda()
@@ -165,18 +152,19 @@ for epc in range(1, 100000+1):
         ones = Variable(torch.ones(bs, 1) * random.uniform(0.8, 1.0), requires_grad=False).cuda()
 
         # ============== Train Discriminator ================ #
+        D.zero_grad()
+        G.zero_grad()
         yhat = G(x, z, code)  # for updating discriminator
         yhat.detach()
-        D.zero_grad()
 
-        fake_value = D(x, yhat)  # classify fake samples
-        real_value = D(x, y)  # classify real samples
+        fake_value, _ = D(x, yhat)  # classify fake samples
+        d_loss_fake = adv_loss(fake_value, zeros)
 
-        d_loss_fake = bce_loss(fake_value, zeros)
-        d_loss_real = bce_loss(real_value, ones)
+        real_value, _ = D(x, y)  # classify real samples
+        d_loss_real = adv_loss(real_value, ones)
 
-        d_loss_fake.backward()  # to update D
-        d_loss_real.backward()  # to update D
+        d_loss = d_loss_fake + d_loss_real
+        d_loss.backward()  # to update D
         d_optimizer.step()
 
         d_loss_fake_sum += d_loss_fake.item()
@@ -185,69 +173,91 @@ for epc in range(1, 100000+1):
         # =============== Train Generator ================= #
         D.zero_grad()
         G.zero_grad()
-        Q.zero_grad()
 
         yhat = G(x, z, code)
-        fake_value = D(x, yhat)  # classify fake samples
-        g_loss = bce_loss(fake_value, ones)
+        fake_value, _ = D(x, yhat)  # classify fake samples
+        g_loss = adv_loss(fake_value, ones)
         g_loss.backward(retain_graph=True)
+        g_optimizer.step()
 
-        code_hat = Q(x, yhat)  # classify fake samples
-        c_loss = mse_loss(code_hat, code) * 1000
+        # ================== Maximize Info ================ #
+        D.zero_grad()
+        G.zero_grad()
+
+        yhat = G(x, z, code)
+        fake_value, code_hat = D(x, yhat)  # classify fake samples
+        c_loss = mse_loss(code_hat, code) * 100
         c_loss.backward()  # through Q and G
 
-        # yhat = G(x, z, c)
-        # g_gt_loss = mse_loss(yhat, y) * landa
-        # g_gt_loss.backward()
-
         g_optimizer.step()
-        q_optimizer.step()
+        d_optimizer.step()
 
         g_loss_sum += g_loss.item()
         recon_loss_sum += c_loss.item()
-        # ********** Variety loss ************
-        # y_hat_2 = generator(xs, noise_2)  # for updating generator
-        # c_hat_fake_2 = discriminator(xs, y_hat_2)  # classify fake samples
-        # gen_loss_variety = torch.log(y_hat_2 - y_hat_1)
 
-        # gen_loss_fooling = discriminationLoss(c_hat_fake_2, Variable(torch.ones(batch_size, 1, 1).cuda()))
-        # gen_loss_fooling = bce_loss(c_hat_fake_1, (torch.ones(batch_size, 1, 1) * random.uniform(0.7, 1.2)).cuda())
+    # =================== TEST ====================
+    if (epc % 100) == 0:
+        # KL Divergence Estimation (by 'y' element of last coordinate in the sample trajectory)
+        n_bins = 30
+        bin_bounds = np.linspace(-0.25, 1.25, n_bins+1)
+        target_hist = np.zeros(n_bins, dtype=float)
+        gen_hist = np.zeros(n_bins, dtype=float)
+        for i in range(0, n_samples):
+            y = samples[i, -1, 1]
+            bin_ind = int((y - bin_bounds[0]) // (bin_bounds[1] - bin_bounds[0]))
+            if 0 <= bin_ind < n_bins:
+                target_hist[bin_ind] += 1 / n_samples
+        n_generate_samples = 1000
+        xs = np.tile(samples[:, :n_past], (1 + n_generate_samples // n_samples, 1, 1))
+        xs = xs[:n_generate_samples]
+        zs = torch.randn(n_generate_samples, noise_vec_len, 1)
+        cs = torch.rand(n_generate_samples, code_vec_len, 1)
+        yhats = G(torch.from_numpy(xs).type(torch.FloatTensor),
+                  zs.type(torch.FloatTensor), cs.type(torch.FloatTensor)).cpu().data.numpy()
+        for i in range(n_generate_samples):
+            bin_ind = int((yhats[i, -1, 1] - bin_bounds[0]) // (bin_bounds[1] - bin_bounds[0]))
+            if 0 <= bin_ind < n_bins:
+                gen_hist[bin_ind] += 1 / n_generate_samples
 
-        # loss_gt = groundTruthLoss(yhat, y) / n_next
-        # gen_loss_gt += loss_gt.item()
-        # gen_loss = loss_gt # + (gen_loss_fooling * generator.use_noise * lambda_dc_loss)
-        #
-        # gen_loss.backward()
-        # g_optimizer.step()
-        #
-        # gen_total_loss_accum += gen_loss.item()
-    print('Epoch: [%d] | G Loss=%4f | D Loss Fake=%4f | D Loss Real=%4f | c Reconstruct Loss=%3f'
-          % (epc, g_loss_sum/n_samples, d_loss_fake_sum/n_samples, d_loss_real_sum/n_samples, recon_loss_sum/n_samples))
+        # ============ Save KLD Plot =============#
+        KLD = 0
+        for bb in range(n_bins):
+            KLD += gen_hist[bb] * np.log((gen_hist[bb] + 1e-6) / (target_hist[bb] + 1e-6))
+        if last_epc >= 0:
+            plt.figure(0)
+            plt.plot([last_epc, epc], [last_kld, KLD], 'b')
+            plt.xlabel('Itr')
+            plt.grid(True, axis='y')
+            plt.savefig(os.path.join(out_dir, 'KLD.svg'))
+        last_epc, last_kld = epc, KLD
 
-    if (epc % 500) == 0:
-        for i in range(0, n_modes):
+        # ============== Visualize Results ============
+        plt.figure(1)
+        for i in range(0, n_samples):
             x = samples[i, :n_past]
             y = samples[i, n_past:]
-            z = torch.rand(noise_vec_len, 1)
-            # c = torch.rand(1, 1)
-            c = torch.ones(1, 1) * i/(n_modes -1)
+            y = np.concatenate((x[-1].reshape(1, -1), y))
+
+            plt.plot(x[:, 0], x[:, 1], 'b', linewidth=3.0)  # , label='obsv [%d]' %i)
+            plt.plot(y[:, 0], y[:, 1], 'g', linewidth=3.0)  # , label='sample [%d]' %i)
+
+        K = 100
+        for i in range(0, K+1):
+            x = samples[i, :n_past]
+            z = torch.randn(noise_vec_len, 1)
+            c = torch.ones(1, 1) * i/K
             yhat = G(torch.from_numpy(x).type(torch.FloatTensor).unsqueeze(0),
                      z.type(torch.FloatTensor).unsqueeze(0),
                      c.type(torch.FloatTensor).unsqueeze(0))
-            code_hat = Q(torch.from_numpy(x).type(torch.FloatTensor).unsqueeze(0), yhat)
-            # print(c_hat - c)
+            _, code_hat = D(torch.from_numpy(x).type(torch.FloatTensor).unsqueeze(0), yhat)
             yhat = yhat.cpu().data.numpy().reshape(-1, 2)
-
-            y = np.concatenate((x[-1].reshape(1, -1), y))
             yhat = np.concatenate((x[-1].reshape(1, -1), yhat))
-            plt.plot(x[:, 0], x[:, 1])  # , label='obsv [%d]' %i)
-            plt.plot(y[:, 0], y[:, 1], label='sample [%d]' % i)
-            plt.plot(yhat[:, 0], yhat[:, 1], '--', label='pred [c=%.2f]' % c.item())
+            plt.plot(yhat[:, 0], yhat[:, 1], '--', alpha=0.7)
 
         plt.title('Epoch = %d' %epc)
-        # plt.suptitle('lambda = %f' %landa)
-        plt.legend()
         plt.xlim([-0.2, 1])
         plt.ylim([-0.1, 0.8])
-        plt.show()
+        plt.savefig(os.path.join(out_dir, 'out_%05d.png' % epc))
+        plt.savefig(os.path.join(out_dir, 'last.svg'))
+        plt.clf()
 
