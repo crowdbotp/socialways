@@ -13,28 +13,44 @@ n_past = 2
 n_next = 2
 samples_len = n_past + n_next
 n_modes = 3
+n_conditions = 3
 samples = []
 for ii in range(128):
-    p0 = [-1, 1]
-    p1 = [1, 1 + (ii % 2) * 0.0]
+    cond = (ii//n_modes) % n_conditions
+    if cond == 0:
+        p0 = np.array([0, 0.5])
+        dir = 1
+    elif cond == 1:
+        p0 = np.array([0, -1.0])
+        dir = 1
+    else:
+        p0 = np.array([5, -0.5])
+        dir = -1
+
+    p1 = dir * np.array([1, 0]) + p0
     r = np.random.randn(1) / 50
     if ii % n_modes == 0:
-        p2 = [2, 0+r]
-        p3 = [3, 0+r]
+        p2 = dir * np.array([1, -1+r]) + p1
     elif ii % n_modes == 1:
-        p2 = [2, 2+r]
-        p3 = [3, 2+r]
+        p2 = dir * np.array([1, 1+r]) + p1
     else: # if ii % n_modes == 2:
-        p2 = [2, 3+r]
-        p3 = [3, 3+r]
+        p2 = dir * np.array([1, 2+r]) + p1
+    p3 = p2 + np.array([1, 0]) * dir
 
     samples.append(np.array([p0, p1, p2, p3]))
 
 n_samples = len(samples)
 samples = np.array(samples)
+samples = samples / 5
+#
+# for ii in range(n_samples):
+#     plt.plot(samples[ii,:,0], samples[ii,:,1])
+# plt.show()
+# exit(1)
+
 noise_vec_len = 1
 code_vec_len = 1
-samples = samples / 5
+
 out_dir = "../gan_out"
 os.makedirs(out_dir, exist_ok=True)
 
@@ -48,28 +64,25 @@ def plot_samples():
         x = samples[i, :n_past]
         y = samples[i, n_past:]
         y = np.concatenate((x[-1].reshape(1, -1), y))
-        plt.plot(y[:, 0], y[:, 1], label='sample [%d]' % i)
-        plt.text(y[-1, 0], y[-1, 1], 'sample %d' % i)
+        plt.plot(y[:, 0], y[:, 1], 'g', label='sample [%d]' % i)
+        # plt.text(y[-1, 0], y[-1, 1], 'sample %d' % i)
+        plt.plot(x[:, 0], x[:, 1], 'b', label='obsv')
+        # plt.text(x[0, 0], x[0, 1] + 0.02, 'observation')
 
-    plt.plot(x[:, 0], x[:, 1], 'y', label='obsv')
-    plt.text(x[0, 0], x[0, 1] + 0.02, 'observation')
-    plt.xlim([-0.2, 1])
-    plt.ylim([-0.1, 0.5])
+    plt.xlim([-0.1, 1.1])
+    plt.ylim([-0.6, 0.6])
+    plt.title('Toy Example 2')
     plt.show()
 
 
-def fc_block(in_size, out_size, bn=False):
-    block = [nn.Linear(in_size, out_size),
-             nn.LeakyReLU(0.2, inplace=True)]
-    if bn: block.append(nn.BatchNorm1d(out_size, 0.8))
-    return nn.Sequential(*block)
 
 
 class Generator(nn.Module):
     def __init__(self):
         super(Generator, self).__init__()
-        hidden_size = 32
-        self.obsv_encoder = fc_block(n_past * 2, hidden_size).cuda()
+        hidden_size = 64
+        self.obsv_encoder = nn.Sequential(fc_block(n_past * 2, hidden_size),
+                                          fc_block(hidden_size, hidden_size, False)).cuda()
         self.noise_encoder = fc_block(noise_vec_len, hidden_size)    .cuda()
         self.code_encoder = fc_block(code_vec_len, hidden_size).cuda()
         self.fc_out = nn.Sequential(fc_block(hidden_size * 3, hidden_size),
@@ -94,7 +107,8 @@ class Discriminator(nn.Module):
         super(Discriminator, self).__init__()
         hidden_size = 32
         self.obsv_encoder = fc_block(n_past * 2, hidden_size).cuda()
-        self.pred_encoder = fc_block(n_next * 2, hidden_size).cuda()
+        self.pred_encoder = nn.Sequential(fc_block(n_next * 2, hidden_size),
+                                          fc_block(hidden_size, hidden_size)).cuda()
         self.some_layers = nn.Sequential(fc_block(hidden_size + hidden_size, hidden_size),
                                          fc_block(hidden_size, hidden_size),
                                          fc_block(hidden_size, hidden_size),
@@ -241,11 +255,11 @@ for epc in trange(1, 100000+1):
             plt.plot(x[:, 0], x[:, 1], 'b', linewidth=3.0)  # , label='obsv [%d]' %i)
             plt.plot(y[:, 0], y[:, 1], 'g', linewidth=3.0)  # , label='sample [%d]' %i)
 
-        K = 100
-        for i in range(0, K+1):
+        K = n_samples
+        for i in range(0, K):
             x = samples[i, :n_past]
             z = torch.randn(noise_vec_len, 1)
-            c = torch.ones(1, 1) * i/K
+            c = torch.rand(1, 1) * i/K
             yhat = G(torch.from_numpy(x).type(torch.FloatTensor).unsqueeze(0),
                      z.type(torch.FloatTensor).unsqueeze(0),
                      c.type(torch.FloatTensor).unsqueeze(0))
@@ -255,9 +269,10 @@ for epc in trange(1, 100000+1):
             plt.plot(yhat[:, 0], yhat[:, 1], '--', alpha=0.7)
 
         plt.title('Epoch = %d' %epc)
-        plt.xlim([-0.2, 1])
-        plt.ylim([-0.1, 0.8])
+        plt.xlim([-0.1, 1.1])
+        plt.ylim([-0.6, 0.6])
         plt.savefig(os.path.join(out_dir, 'out_%05d.png' % epc))
         plt.savefig(os.path.join(out_dir, 'last.svg'))
+        # plt.show()
         plt.clf()
 

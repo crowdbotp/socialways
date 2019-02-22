@@ -6,7 +6,11 @@ import matplotlib.pyplot as plt
 # n_next = 8
 # n_inp_features = 2
 from scipy import ndimage
-
+def fc_block(in_size, out_size, bn=False):
+    block = [nn.Linear(in_size, out_size),
+             nn.LeakyReLU(0.2, inplace=True)]
+    if bn: block.append(nn.BatchNorm1d(out_size, 0.8))
+    return nn.Sequential(*block)
 
 class ConstVelModel:
     def __init__(self):
