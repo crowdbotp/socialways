@@ -7,10 +7,10 @@ import matplotlib.pyplot as plt
 from matplotlib.figure import figaspect
 from torch.utils.data import DataLoader
 
-from src.math_utils import norm
-from src.parse_utils import *
-from src.learning_utils import *
-from src.kalman import MyKalman
+from src.utils.math_utils import norm
+from src.utils.parse_utils import *
+from src.utils.learning_utils import *
+from src.utils.kalman import MyKalman
 from src.models import ConstVelModel, VanillaLSTM, SequentialPredictorWithVelocity
 from src.visualize import Display, FakeDisplay, to_image_frame
 

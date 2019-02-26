@@ -1,5 +1,6 @@
 import csv
 import math
+import sys
 import numpy as np
 import os
 from pandas import DataFrame, concat
@@ -66,6 +67,13 @@ class BIWIParser:
         self.all_ids = list()
         self.actual_fps = 0.
         self.delimit = ' '
+        self.p_data = []
+        self.v_data = []
+        self.t_data = []
+        self.min_t = int(sys.maxsize)
+        self.max_t = -1
+        self.interval = 6
+
 
     def load(self, filename, down_sample=1):
         pos_data_dict = dict()
@@ -92,7 +100,7 @@ class BIWIParser:
             with open(file, 'r') as data_file:
                 content = data_file.readlines()
                 id_list = list()
-                for row in content:
+                for i, row in enumerate(content):
                     row = row.split(self.delimit)
                     while '' in row: row.remove('')
                     if len(row) < 8: continue
@@ -101,6 +109,9 @@ class BIWIParser:
                     id = round(float(row[1]))
                     if ts % down_sample != 0:
                         continue
+                    if ts < self.min_t: self.min_t = ts
+                    if ts > self.max_t: self.max_t = ts
+
 
                     px = float(row[2])
                     py = float(row[4])
@@ -118,27 +129,22 @@ class BIWIParser:
                     time_data_dict[id] = np.hstack((time_data_dict[id], np.array([ts])))
             self.all_ids += id_list
 
-        p_data = list()
-        v_data = list()
-        t_data = list()
-
         for key, value in pos_data_dict.items():
             poss_i = np.array(value)
-            p_data.append(poss_i)
+            self.p_data.append(poss_i)
             # TODO: you can apply a Kalman filter/smoother on v_data
             vels_i = np.array(vel_data_dict[key])
-            v_data.append(vels_i)
-            t_data.append(np.array(time_data_dict[key]))
+            self.v_data.append(vels_i)
+            self.t_data.append(np.array(time_data_dict[key]))
 
-        for i in range(len(p_data)):
-            poss_i = np.array(p_data[i])
+        # calc scale
+        for i in range(len(self.p_data)):
+            poss_i = np.array(self.p_data[i])
             self.scale.min_x = min(self.scale.min_x, min(poss_i[:, 0]))
             self.scale.max_x = max(self.scale.max_x, max(poss_i[:, 0]))
             self.scale.min_y = min(self.scale.min_y, min(poss_i[:, 1]))
             self.scale.max_y = max(self.scale.max_y, max(poss_i[:, 1]))
         self.scale.calc_scale()
-
-        return p_data, v_data, t_data
 
 
 class SeyfriedParser:
@@ -278,4 +284,54 @@ def to_supervised(data, n_in=1, n_out=1, diff_in=False, diff_out=True, drop_nan=
         agg.dropna(inplace=True)
 
     return agg.values
+
+
+def create_dataset(p_data, t_data, t_range, n_past=8, n_next=8, max_ped=20):
+    dataset_t = []
+    dataset_x = []
+    dataset_y = []
+    for t in range(t_range.start, t_range.stop, 1):
+        found_peds_x = []
+        found_peds_y = []
+        for i in range(len(t_data)):
+            t0_ind = (np.where(t_data[i] == t))[0]
+            tP_ind = (np.where(t_data[i] == t - t_range.step * n_past))[0]
+            tF_ind = (np.where(t_data[i] == t + t_range.step * (n_next - 1)))[0]
+
+            if t0_ind.shape[0] == 0 or tP_ind.shape[0] == 0 or tF_ind.shape[0] == 0:
+                continue
+
+            t0_ind = t0_ind[0]
+            tP_ind = tP_ind[0]
+            tF_ind = tF_ind[0]
+
+            dataset_t.append(t)
+            dataset_x.append(p_data[i][tP_ind:t0_ind])
+            dataset_y.append(p_data[i][t0_ind:tF_ind + 1])
+
+            # found_peds_x.append(p_data[i][tP_ind:t0_ind])
+            # found_peds_y.append(p_data[i][t0_ind:tF_ind + 1])
+
+        # if len(found_peds_x) == 0:
+        #     continue
+        # for _ in range(len(found_peds_y), max_ped):
+        #     found_peds_x.append(np.ones((n_past, 2)) * -1)
+        #     found_peds_y.append(np.ones((n_next, 2)) * -1)
+        # dataset_X.append(found_peds_x)
+        # dataset_Y.append(found_peds_y)
+
+    sub_batches = []
+    last_t = -1
+    for i, t in enumerate(dataset_t):
+        if t > last_t:
+            sub_batches.append([i, i+1])
+        else:
+            sub_batches[-1][1] = i+1
+        last_t = t
+
+    dataset_t = np.array(sub_batches).astype(np.int16)
+    dataset_x = np.array(dataset_x).astype(np.float32)
+    dataset_y = np.array(dataset_y).astype(np.float32)
+
+    return dataset_x, dataset_y, dataset_t
 

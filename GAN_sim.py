@@ -43,10 +43,10 @@ n_samples = len(samples)
 samples = np.array(samples)
 samples = samples / 5
 #
-# for ii in range(n_samples):
-#     plt.plot(samples[ii,:,0], samples[ii,:,1])
-# plt.show()
-# exit(1)
+for ii in range(n_samples):
+    plt.plot(samples[ii,:,0], samples[ii,:,1])
+plt.show()
+exit(1)
 
 noise_vec_len = 1
 code_vec_len = 1

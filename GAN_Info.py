@@ -12,7 +12,7 @@ import os.path
 import scipy.optimize as op
 
 # ==== Generate sim dataset =====
-n_samples = 128 # 256
+n_samples = 1280 # 256
 n_past = 2
 n_next = 2
 samples_len = n_past + n_next
@@ -42,15 +42,15 @@ for ii in range(n_samples):
     real_samples.append(np.array([[x0, y0], [x1, y1], [x2, y2], [x3, y3]]))
 real_samples = np.array(real_samples) / 8
 
-# for ii in range(len(real_samples)):
-#     plt.plot(real_samples[ii, :n_past, 0], real_samples[ii, :n_past, 1], 'm')
-#     plt.plot(real_samples[ii, n_past-1:, 0], real_samples[ii, n_past-1:, 1], 'b')
-#     plt.plot(real_samples[ii, -1:, 0], real_samples[ii, -1:, 1], 'go', ms=4)
-#     plt.plot(real_samples[ii, 0, 0], real_samples[ii, 0, 1], 'ro')
-# plt.plot(0,0, 'gx')
-# plt.title('Trajectory Symmetric Toy Example')
-# plt.show()
-# exit(1)
+for ii in range(len(real_samples)):
+    plt.plot(real_samples[ii, :n_past, 0], real_samples[ii, :n_past, 1], 'm')
+    plt.plot(real_samples[ii, n_past-1:, 0], real_samples[ii, n_past-1:, 1], 'b', linewidth=4, alpha=0.07)
+    plt.plot(real_samples[ii, -1:, 0], real_samples[ii, -1:, 1], 'go', ms=4, alpha=0.4)
+    plt.plot(real_samples[ii, 0, 0], real_samples[ii, 0, 1], 'ro')
+plt.plot(0,0, 'gx')
+plt.title('Trajectory Toy Dataset')
+plt.show()
+exit(1)
 
 noise_vec_len = 1
 code_vec_len = 1

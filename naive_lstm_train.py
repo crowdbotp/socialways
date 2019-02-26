@@ -5,8 +5,8 @@ from keras.layers import LSTM, Dense, Reshape
 import pickle
 from keras.utils import plot_model
 
-from src.learning_utils import MyConfig
-from src.parse_utils import Scale, to_supervised, SeyfriedParser, BIWIParser
+from src.utils.learning_utils import MyConfig
+from src.utils.parse_utils import Scale, to_supervised, SeyfriedParser, BIWIParser
 import matplotlib.pyplot as plt
 
 np.random.seed(7)

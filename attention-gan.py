@@ -12,6 +12,7 @@ nX = 8
 nY = 12
 nZ = 32
 
+
 class Generator(nn.Module):
     def __init__(self):
         super(Generator, self).__init__()
@@ -54,4 +55,5 @@ def train():
     # train D
     # train G
     # roll back D
+    pass
 
