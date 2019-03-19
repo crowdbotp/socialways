@@ -321,17 +321,33 @@ def create_dataset(p_data, t_data, t_range, n_past=8, n_next=8, max_ped=20):
         # dataset_Y.append(found_peds_y)
 
     sub_batches = []
-    last_t = -1
+    last_included_t = -1000
+    min_interval = 1
     for i, t in enumerate(dataset_t):
-        if t > last_t:
+        if t > last_included_t + min_interval:
             sub_batches.append([i, i+1])
-        else:
-            sub_batches[-1][1] = i+1
-        last_t = t
+            last_included_t = t
 
-    dataset_t = np.array(sub_batches).astype(np.int16)
+        if t == last_included_t:
+            sub_batches[-1][1] = i + 1
+
+    sub_batches = np.array(sub_batches).astype(np.int16)
+    dataset_x_ = []
+    dataset_y_ = []
+    last_ind = 0
+    for ii, sb in enumerate(sub_batches):
+        dataset_x_.append(dataset_x[sb[0]:sb[1]])
+        dataset_y_.append(dataset_y[sb[0]:sb[1]])
+        sb[1] = sb[1] - sb[0] + last_ind
+        sb[0] = last_ind
+        last_ind = sb[1]
+
+    dataset_x = np.concatenate(dataset_x_)
+    dataset_y = np.concatenate(dataset_y_)
+
+    sub_batches = np.array(sub_batches).astype(np.int16)
     dataset_x = np.array(dataset_x).astype(np.float32)
     dataset_y = np.array(dataset_y).astype(np.float32)
 
-    return dataset_x, dataset_y, dataset_t
+    return dataset_x, dataset_y, sub_batches
 

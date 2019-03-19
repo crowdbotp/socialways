@@ -16,14 +16,15 @@ from torch import optim
 from torch.autograd import Variable
 from torch.utils.data import DataLoader
 
-from src.learning_utils import adjust_learning_rate, MyConfig
-from src.math_utils import cart2pol, eps
+from src.utils.learning_utils import adjust_learning_rate, MyConfig
+from src.utils.math_utils import cart2pol, eps
 from src.models import ConstVelModel, NaivePredictor, Discriminator, Generator, SequentialPredictor, SequentialPredictorWithVelocity
-from src.parse_utils import *
-from src.kalman import MyKalman
-from src.visualize import Display, FakeDisplay, to_image_frame
-from src.vanilla_lstm import VanillaLSTM
+from src.utils.parse_utils import *
+from src.utils.kalman import MyKalman
+from src.utils.visualize import Display, FakeDisplay, to_image_frame
+from src.lstm_vanilla import VanillaLSTM
 
+from src.utils.parse_utils import BIWIParser
 
 data_dir = ''  # to be filled bellow
 out_dir = ''  # to be filled bellow
