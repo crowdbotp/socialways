@@ -1,74 +1,64 @@
 import os
-import sys
+import cv2
 import numpy as np
-import scipy.misc
-# from visualize import *
-from skimage import draw
-# import cv2
+import seaborn as sns; sns.set()
+import matplotlib.pyplot as plt
 
-
-# import seaborn as sns
-# import matplotlib.pyplot as plt
-#
-# iris = sns.load_dataset("iris")
-# grid = sns.JointGrid(iris.petal_length, iris.petal_width, space=0, size=6, ratio=50)
-# grid.plot_joint(plt.scatter, color="g")
-# plt.plot([0, 4], [1.5, 0], linewidth=2)
 
 def to_image_frame(Hinv, loc):
     """
-    Given H^-1 and (x, y, z) in world coordinates, returns (u, v, 1) in image
-    frame coordinates.
+    Given H^-1 and world coordinates, returns (u, v) in image coordinates.
     """
-    if loc.ndim > 1:
-        loc_tr = np.transpose(loc)
+    locHomogenous = np.hstack((loc, np.ones((loc.shape[0], 1))))
+    if locHomogenous.ndim > 1:
+        loc_tr = np.transpose(locHomogenous)
         loc_tr = np.matmul(Hinv, loc_tr)  # to camera frame
-        return np.transpose(loc_tr/loc_tr[2])  # to pixels (from millimeters)
+        locXYZ = np.transpose(loc_tr/loc_tr[2])  # to pixels (from millimeters)
+        return locXYZ[:, :2].astype(int)
     else:
-        loc = np.dot(Hinv, loc)  # to camera frame
-        return loc / loc[2]  # to pixels (from millimeters)
+        locHomogenous = np.dot(Hinv, locHomogenous)  # to camera frame
+        locXYZ = locHomogenous / locHomogenous[2]  # to pixels (from millimeters)
+        return locXYZ[:2].astype(int)
 
 
-def line_np(im, ll, color=[]):
+def line_cv(im, ll, value, width):
     for tt in range(ll.shape[0] - 1):
-        rr, cc, val = draw.line_aa(ll[tt][1], ll[tt][0], ll[tt + 1][1], ll[tt + 1][0])
-        im[rr, cc] =  (val * 10).astype(np.int8)
-        # scipy.misc.imsave("out.png", img)
+        cv2.line(im, (ll[tt][1], ll[tt][0]), (ll[tt + 1][1], ll[tt + 1][0]), value, width)
 
 
-def heat_map(im, obsvs, pred_data):
+def heat_map(im, pred_data):
     nSmp = pred_data.shape[0]
     nPed = pred_data.shape[1]
-    nPast = obsvs.shape[1]
-    nNext = pred_data.shape[2]
-    onesN = np.ones((nNext, 1))
-    for ii in range(nPed):
-        obsv_XY_i = to_image_frame(Hinv, np.hstack((obsvs[ii], onesP)))[:, :2].astype(int)
-        for kk in range(nSmp):
-            preds_our_XY_ik = to_image_frame(Hinv, np.hstack((pred_data[kk, ii], onesN)))[:, :2].astype(int)
-            preds_our_XY_ik = np.vstack((obsv_XY_i[-1].reshape((1, -1)), preds_our_XY_ik))
-            for tt in range(nNext):
-                line_np(im, preds_our_XY_ik)
-    # np.save('out,png', im)
 
-
-
-def line_cv(im, ll, color):
-    for tt in range(ll.shape[0] - 1):
-        cv2.line(im, (ll[tt][1], ll[tt][0]), (ll[tt + 1][1], ll[tt + 1][0]), color, 2)
+    K_im = np.zeros((nSmp, im.shape[0], im.shape[1]), np.uint8)
+    for kk in range(nSmp):
+        for ii in range(nPed):
+            preds_our_XY_ik = to_image_frame(Hinv, pred_data[kk, ii])
+            line_cv(K_im[kk], preds_our_XY_ik, value=10, width=10)
+    lines_im = np.sum(K_im, axis=0).astype(np.uint8)
+    lines_im = cv2.blur(lines_im, (5, 5))
+    my_dpi = 96
+    plt.figure(figsize=(lines_im.shape[1]/my_dpi, lines_im.shape[0]/my_dpi), dpi=my_dpi)
+    cmap = sns.dark_palette("purple")
+    sns.heatmap(lines_im, cmap=cmap, cbar=False, xticklabels=False, yticklabels=False)
+    plt.margins(0, 0)
+    plt.gca().set_axis_off()
+    plt.subplots_adjust(top=1, bottom=0, right=1, left=0, hspace=0, wspace=0)
+    plt.gca().xaxis.set_major_locator(plt.NullLocator())
+    plt.gca().yaxis.set_major_locator(plt.NullLocator())
+    # heatmap = np.fromstring(fig.canvas.tostring_rgb(), dtype=np.uint8, sep='')
+    # heatmap = heatmap.reshape(fig.canvas.get_width_height()[::-1] + (3,))
+    plt.savefig('..\\..\\tmp.png')
+    heatmap = cv2.imread('..\\..\\tmp.png')
+    cv2.addWeighted(im, 0.4, heatmap, 1, 0, im)
 
 
 dataset_name = "hotel"
-dir = '../preds-iccv/' + dataset_name # + '/pred-' + str(current_t) + '.npz'
-
-Homography_file = os.path.join('../data/' + dataset_name, "H.txt")
+dir = '..\\..\\preds-iccv\\' + dataset_name  # + '/pred-' + str(current_t) + '.npz'
+Homography_file = os.path.join('..\\..\\data\\' + dataset_name, "H.txt")
 Hinv = np.linalg.inv(np.loadtxt(Homography_file))
+cap = cv2.VideoCapture('..\\..\\data\\' + dataset_name + '\\video.avi')
 
-# cap = cv2.VideoCapture('../data/' + dataset_name + '/video.avi')
-# frame_id = -1
-
-im_size = (576, 720)
-img = np.zeros(im_size, dtype=np.uint8)
 for dirpath, dirnames, filenames in os.walk(dir):
     for f in filenames:
         data = np.load(os.path.join(dirpath, f))
@@ -78,45 +68,36 @@ for dirpath, dirnames, filenames in os.walk(dir):
         preds_lnr = data['preds_lnr']
         time_stamp = data['timestamp']
 
-        # cap.set(POS_FRAMES, time_stamp-1)
-        # ret, im = cap.read()
-        im = img
-
-        print(im.shape)
-
         nPed = obsvs.shape[0]
         nPast = obsvs.shape[1]
         nNext = preds_lnr.shape[1]
-        onesP = np.ones((nPast, 1))
-        onesN = np.ones((nNext, 1))
         nSmp = preds_our.shape[0]
+        onesP = np.ones((nPast, 1))
+        onesN = np.ones((nNext + 1, 1))
+
+        if nPed < 2:
+            continue
+
+        time_offset = -12
+        cap.set(cv2.CAP_PROP_POS_FRAMES, time_stamp + time_offset)
+        ret, im = cap.read()
+
+        preds_gtt_aug = np.concatenate((obsvs[:, -1].reshape((nPed, 1, 2)), preds_gtt), axis=1)
+        preds_lnr_aug = np.concatenate((obsvs[:, -1].reshape((nPed, 1, 2)), preds_lnr), axis=1)
+        cur_loc_K = np.vstack([obsvs[:, -1].reshape((1, nPed, 1, 2)) for i in range(nSmp)])
+        preds_our_aug = np.concatenate((cur_loc_K, preds_our), axis=2)
+
+        heat_map(im, preds_our_aug)
         for ii in range(nPed):
-            obsv_XY = to_image_frame(Hinv, np.hstack((obsvs[ii], onesP)))[:, :2].astype(int)
-            pred_lnr_XY = to_image_frame(Hinv, np.hstack((preds_lnr[ii], onesN)))[:, :2].astype(int)
-            pred_lnr_XY = np.vstack((obsv_XY[-1].reshape((1, -1)), pred_lnr_XY))
-            pred_gtt_XY = to_image_frame(Hinv, np.hstack((preds_gtt[ii], onesN)))[:, :2].astype(int)
-            pred_gtt_XY = np.vstack((obsv_XY[-1].reshape((1, -1)), pred_gtt_XY))
-            for tt in range(nPast - 1):
-                line_np(im, obsv_XY, (255, 0, 0))
-            for tt in range(nNext - 1):
-                line_np(im, pred_lnr_XY, (255,0,255))
-                line_np(im, pred_gtt_XY, (255, 255, 0))
+            obsv_XY = to_image_frame(Hinv, obsvs[ii])
+            pred_lnr_XY = to_image_frame(Hinv, preds_lnr_aug[ii])
+            pred_gtt_XY = to_image_frame(Hinv, preds_gtt_aug[ii])
+            line_cv(im, obsv_XY, (255, 0, 0), 2)
+            line_cv(im, pred_lnr_XY, (0,100,155), 1)
+            line_cv(im, pred_gtt_XY, (255, 255, 0), 1)
 
-        heat_map(im, obsvs, preds_our)
-            # for kk in range(nSmp):
-            #     preds_our_XY_kk = to_image_frame(Hinv, np.hstack((preds_our[kk, ii], onesN)))[:, :2].astype(int)
-            #     preds_our_XY_kk = np.vstack((obsv_XY[-1].reshape((1, -1)), preds_our_XY_kk))
-            #     for tt in range(nNext - 1):
-            #         line_np(im, preds_our_XY_kk, (0, 0, 255))
+        cv2.imshow('Press s to save', im)
+        key = cv2.waitKeyEx()
+        if key == 115:
+            cv2.imwrite("..\\..\\outputs-iccv\\"+dataset_name+"\\output-"+str(time_stamp)+".png", im)
 
-        # cv2.imshow('frame', im)
-        # cv2.waitKeyEx(0)
-        # if cv2.waitKey(1) & 0xFF == ord('q'):
-        #     break
-
-# while(cap.isOpened()):
-#     ret, frame = cap.read()
-#     frame_id += 1
-#     cv2.imshow('frame', frame)
-#     if cv2.waitKey(1) & 0xFF == ord('q'):
-#         break
