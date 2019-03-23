@@ -12,19 +12,13 @@ from torch.utils.data import DataLoader
 from src.utils.parse_utils import BIWIParser, Scale, create_dataset
 
 
-# ========== set input/output files
-csv_file = '../data/eth/obsmat.txt'
-data_file = '../data/eth/data_8_12.npz'
-model_file = '../trained_models/encoder4d_decoderfck_gan4d.pt'
-
-
-def save_checkpoint(state, is_best, filename):
-    torch.save(state, filename)
-
-
-def init_weights(model):
-    for name, param in model.named_parameters():
-        torch.nn.init.xavier_uniform(param)
+# ========== set input/output files ============
+dataset_name = 'eth'  # FIXME: Notice to select the proper dataset
+annotation_file = '../data/' + dataset_name + '/obsmat.txt'
+processed_data_file = '../data/' + dataset_name +'/data_8_12.npz'
+# annotation_file = '../data/trajnet/train/stanford/bookstore.txt'
+# processed_data_file = '../data/trajnet/train/stanford/bookstore_8_12.npz'
+model_file = '../trained_models/iccv_gan_128_' + dataset_name + '.pt'
 
 
 def get_traj_4d(obsv_p, pred_p):
@@ -41,7 +35,7 @@ def get_traj_4d(obsv_p, pred_p):
 def cal_error(pred_hat, pred):
     N = pred.size(0)
     T = pred.size(1)
-    err_all = torch.pow(ss * (pred_hat - pred), 2).sum(dim=2).sqrt()  # N x T
+    err_all = torch.pow((pred_hat - pred)/ss, 2).sum(dim=2).sqrt()  # N x T
     FDEs = err_all.sum(dim=0).item() / N
     ADEs = torch.cumsum(FDEs)
     for ii in range(T):
@@ -189,18 +183,21 @@ class EncoderLstm(nn.Module):
 
 
 class Discriminator(nn.Module):
-    def __init__(self, n_next):
+    def __init__(self, n_next, hidden_dim):
         super(Discriminator, self).__init__()
-        self.lstm_dim = 64
+        self.lstm_dim = hidden_dim
         self.n_next = n_next
-        self.obsv_encoder_lstm = nn.LSTM(4, self.lstm_dim, batch_first=True)
-        self.obsv_encoder_fc = nn.Sequential(nn.Linear(self.lstm_dim, 32), nn.LeakyReLU(0.2),
-                                             nn.Linear(32, 16))
-        self.pred_encoder = nn.Sequential(nn.Linear(4*self.n_next, 32), nn.LeakyReLU(0.2),
-                                          nn.Linear(32, 16))
-        self.classifier = nn.Sequential(nn.Linear(32, 32), nn.LeakyReLU(0.2),
-                                        nn.Linear(32, 16), nn.LeakyReLU(0.2),
-                                        nn.Linear(16, 1))
+        self.obsv_encoder_lstm = nn.LSTM(4, hidden_dim, batch_first=True)
+        self.obsv_encoder_fc = nn.Sequential(nn.Linear(hidden_dim, hidden_dim//2), nn.LeakyReLU(0.2),
+                                             nn.Linear(hidden_dim//2, hidden_dim//2))
+        self.pred_encoder = nn.Sequential(nn.Linear(n_next*4, hidden_dim//2), nn.LeakyReLU(0.2),
+                                          nn.Linear(hidden_dim//2, hidden_dim//2))
+        self.classifier = nn.Sequential(nn.Linear(hidden_dim, hidden_dim//2), nn.LeakyReLU(0.2),
+                                        # nn.Linear(self.lstm_dim//2, self.lstm_dim//2), nn.LeakyReLU(0.2),
+                                        nn.Linear(hidden_dim//2, 1))
+
+        self.latent_decoder = nn.Sequential(nn.Linear(self.lstm_dim, self.lstm_dim//2), nn.LeakyReLU(0.2),
+                                        nn.Linear(self.lstm_dim//2, 1))
 
     def forward(self, obsv, pred, sub_batches=[]):
         bs = obsv.size(0)
@@ -208,10 +205,11 @@ class Discriminator(nn.Module):
                     torch.zeros(1, bs, self.lstm_dim).cuda())
         obsv_code, lstm_h_c = self.obsv_encoder_lstm(obsv, lstm_h_c)
         obsv_code = self.obsv_encoder_fc(obsv_code[:, -1])
-        pred_code = self.pred_encoder(pred.view(-1, 4 * self.n_next))
+        pred_code = self.pred_encoder(pred.view(-1, self.n_next*4))
         both_codes = torch.cat([obsv_code, pred_code], dim=1)
         label = self.classifier(both_codes)
-        return label
+        code_hat = self.latent_decoder(both_codes)
+        return label, code_hat
 
     def load(self, backup):
         for m_from, m_to in zip(backup.modules(), self.modules()):
@@ -220,14 +218,15 @@ class Discriminator(nn.Module):
                 if m_to.bias is not None:
                     m_to.bias.data = m_from.bias.data.clone()
 
+
 class DecoderFC(nn.Module):
-    def __init__(self, hidden_size):
+    def __init__(self, hidden_dim):
         super(DecoderFC, self).__init__()
-        self.hidden_size = hidden_size
-        self.fc1 = torch.nn.Sequential(torch.nn.Linear(hidden_size, 64), nn.LeakyReLU(0.2),
+        self.fc1 = torch.nn.Sequential(torch.nn.Linear(hidden_dim, hidden_dim), nn.LeakyReLU(0.2),
                                        # torch.nn.Linear(64, 64), nn.LeakyReLU(0.2),
-                                       torch.nn.Linear(64, 32), nn.LeakyReLU(0.2),
-                                       torch.nn.Linear(32,  2))
+                                       torch.nn.Linear(hidden_dim, hidden_dim//2), nn.LeakyReLU(0.2),
+                                       torch.nn.Linear(hidden_dim//2, hidden_dim//4),
+                                       torch.nn.Linear(hidden_dim//4, 2))
 
     def forward(self, coded_tracks, social_codes, noise, sub_batches=[]):
         inp = torch.cat([coded_tracks, social_codes, noise], dim=1)
@@ -239,9 +238,9 @@ class DecoderFCFull(nn.Module):
     def __init__(self, hidden_size, n_next):
         super(DecoderFCFull, self).__init__()
         self.hidden_size = hidden_size
-        self.fc1 = torch.nn.Sequential(torch.nn.Linear(hidden_size, 48), nn.LeakyReLU(0.2),
-                                       torch.nn.Linear(48, 48), nn.LeakyReLU(0.2),
-                                       torch.nn.Linear(48,  n_next * 2))
+        self.fc1 = torch.nn.Sequential(torch.nn.Linear(hidden_size, hidden_size), nn.LeakyReLU(0.2),
+                                       torch.nn.Linear(hidden_size, hidden_size), nn.LeakyReLU(0.2),
+                                       torch.nn.Linear(hidden_size,  n_next * 2))
 
     def forward(self, coded_tracks, social_codes, noise, sub_batches=[]):
         bs = coded_tracks.size(0)
@@ -277,73 +276,62 @@ class DecoderLstm(nn.Module):
 
 
 # parser = BIWIParser()
-# parser.load(csv_file, down_sample=1)
-# t_range = range(int(parser.min_t), int(parser.max_t), parser.interval)
-# dataset_x, dataset_y, dataset_t = create_dataset(parser.p_data, parser.t_data, t_range, n_past=8, n_next=12)
-# np.savez(data_file, dataset_x=dataset_x, dataset_y=dataset_y, dataset_t=dataset_t)
+# parser.load(annotation_file, down_sample=1)
+# interval = 6
+# t_range = range(int(parser.min_t), int(parser.max_t), interval)
+# dataset_obsv, dataset_pred, dataset_t, baches = create_dataset(parser.p_data, parser.t_data, t_range, n_past=8, n_next=12)
+# np.savez(processed_data_file, obsvs=dataset_obsv, preds=dataset_pred, times=dataset_t, baches=baches)
 # exit(1)
 
-data = np.load(data_file)
-dataset_obsv, dataset_pred, the_batches = data['dataset_x'], data['dataset_y'], data['dataset_t']
+data = np.load(processed_data_file)
+dataset_obsv, dataset_pred, dataset_t, the_batches = data['obsvs'], data['preds'], data['times'], data['baches']
 train_size = (len(the_batches) * 4) // 5
 n_next = dataset_pred.shape[1]
 n_train_samples = the_batches[train_size-1][1]
 n_test_samples = dataset_obsv.shape[0] - n_train_samples
 
+print(processed_data_file)
+print('num of train samples = ', n_train_samples)
+
 # normalize
-max_x = max(np.max(dataset_obsv[:, :, 0]), np.max(dataset_pred[:, :, 0]))
-min_x = min(np.min(dataset_obsv[:, :, 0]), np.min(dataset_pred[:, :, 0]))
-max_y = max(np.max(dataset_obsv[:, :, 1]), np.max(dataset_pred[:, :, 1]))
-min_y = min(np.min(dataset_obsv[:, :, 1]), np.min(dataset_pred[:, :, 1]))
-sx = (max_x - min_x)
-sy = (max_y - min_y)
-ss = max(sx, sy)
-dataset_obsv = (dataset_obsv - np.array([min_x, min_y])) / ss
-dataset_pred = (dataset_pred - np.array([min_x, min_y])) / ss
+scale = Scale()
+scale.max_x = max(np.max(dataset_obsv[:, :, 0]), np.max(dataset_pred[:, :, 0]))
+scale.min_x = min(np.min(dataset_obsv[:, :, 0]), np.min(dataset_pred[:, :, 0]))
+scale.max_y = max(np.max(dataset_obsv[:, :, 1]), np.max(dataset_pred[:, :, 1]))
+scale.min_y = min(np.min(dataset_obsv[:, :, 1]), np.min(dataset_pred[:, :, 1]))
+scale.calc_scale(keep_ratio=True)
+ss = scale.sx
+
+# Normalize
+dataset_obsv = scale.normalize(dataset_obsv)
+dataset_pred = scale.normalize(dataset_pred)
 dataset_obsv = torch.FloatTensor(dataset_obsv).cuda()
 dataset_pred = torch.FloatTensor(dataset_pred).cuda()
 
 
-traj_code_len = 32
+hidden_size = 128
 num_social_features = 1
-social_feature_size = 16
+social_feature_size = hidden_size // 4
 VEL_VEC_LEN = 2
-noise_len = 16
+noise_len = hidden_size // 4
 n_lstm_layers = 1
-encoder = EncoderLstm(traj_code_len, n_lstm_layers).cuda()
+encoder = EncoderLstm(hidden_size, n_lstm_layers).cuda()
 attention = AttentionRel().cuda()
 feature_embedder = EmbedSocialFeatures(num_social_features, social_feature_size).cuda()
 
 # FIXME: choose Decoder Model
 # decoder = DecoderLstm(social_feature_size + VEL_VEC_LEN + noise_len, traj_code_len).cuda()
-decoder = DecoderFC(traj_code_len + social_feature_size + noise_len).cuda()
+decoder = DecoderFC(hidden_size + social_feature_size + noise_len).cuda()
 # decoder = DecoderFCFull(traj_code_len + social_feature_size + noise_len, n_next).cuda()
 
 predictor_params = chain(attention.parameters(), encoder.parameters(), decoder.parameters())
-predictor_optimizer = opt.Adamax(predictor_params, lr=0.0002)
+predictor_optimizer = opt.Adamax(predictor_params, lr=0.0002, betas=(0.8, 0.999))
 # optimizer = opt.SGD(predictor_params, lr=0.01, momentum=0.9)
 
-D = Discriminator(n_next).cuda()
-D_optimizer = opt.Adam(D.parameters(), lr=0.0002)
-
+D = Discriminator(n_next, hidden_size).cuda()
+D_optimizer = opt.Adam(D.parameters(), lr=0.0002, betas=(0.8, 0.999))
 mse_loss = nn.MSELoss()
 bce_loss = nn.BCELoss()
-
-if os.path.isfile(model_file):
-    checkpoint = torch.load(model_file)
-    start_epoch = checkpoint['epoch'] + 1
-    min_train_ADE = checkpoint['min_error']
-    attention.load_state_dict(checkpoint['attentioner_dict'])
-    encoder.load_state_dict(checkpoint['lstm_encoder_dict'])
-    decoder.load_state_dict(checkpoint['predictor_dict'])
-    predictor_optimizer.load_state_dict(checkpoint['pred_optimizer'])
-
-    D.load_state_dict(checkpoint['D_dict'])
-    D_optimizer.load_state_dict(checkpoint['D_optimizer'])
-else:
-    min_train_ADE = 10000
-    start_epoch = 1
-
 
 # =========== Baseline Linear Prediction =========
 def predict_cv(obsv, n_next, sub_batches=[]):
@@ -356,12 +344,14 @@ def predict_cv(obsv, n_next, sub_batches=[]):
     return pred_hat
 
 
-def predict(obsv_p, n_next, sub_batches=[]):
+def predict(obsv_p, noise, n_next, sub_batches=[]):
     bs = obsv_p.shape[0]
+    obsv_4d = get_traj_4d(obsv_p, [])
+
+    # Run Obsv-Encoder
     lstm_h_c = (torch.zeros(n_lstm_layers, bs, encoder.hidden_size).cuda(),
                 torch.zeros(n_lstm_layers, bs, encoder.hidden_size).cuda())
     encoder.init_lstm(lstm_h_c[0], lstm_h_c[1])
-    obsv_4d = get_traj_4d(obsv_p, [])
     encoder(obsv_4d)
 
     # take the hidden state of encoder and put it in decoder
@@ -372,16 +362,16 @@ def predict(obsv_p, n_next, sub_batches=[]):
         # emb_features = feature_embedder(features, encoder.lstm_h, sub_batches)
 
     emb_sfeatures = torch.FloatTensor(torch.zeros(bs, feature_embedder.hidden_size)).cuda()
-    noise = torch.FloatTensor(torch.randn((bs, noise_len))).cuda()
     # v_hat = decoder(encoder.lstm_h[0].view(bs, -1), emb_sfeatures, noise)
     # pred_4d = torch.FloatTensor(torch.zeros(bs, n_next, 4)).cuda()
 
     pred_4ds = []
-    p_hat_last = obsv_p[:, -1]
+    last_obsv = obsv_4d[:, -1]
     for ii in range(n_next):
-        pred_v = decoder(encoder.lstm_h[0].view(bs, -1), emb_sfeatures, noise).view(bs, 2)
-        p_hat_last = pred_v + p_hat_last
-        pred_4ds.append(torch.cat([p_hat_last, pred_v], dim=1))
+        new_v = decoder(encoder.lstm_h[0].view(bs, -1), emb_sfeatures, noise).view(bs, 2) # + last_obsv[:, 2:]
+        new_p = new_v + last_obsv[:, :2]
+        last_obsv = torch.cat([new_p, new_v], dim=1)
+        pred_4ds.append(last_obsv)
         encoder(pred_4ds[-1])
 
     return torch.stack(pred_4ds, 1)
@@ -413,16 +403,16 @@ def predict(obsv_p, n_next, sub_batches=[]):
 
 
 # =============== Training Loop ==================
-for epoch in range(start_epoch, 500000 + 1):
+def train():
     tic = time.clock()
-    batch_size = 0; sub_batches = []
     train_ADE, train_FDE = 0, 0
+    batch_size_accum = 0; sub_batches = []
     for ii in range(0, train_size, 1):
         batch_i = the_batches[ii]
 
-        batch_size += batch_i[1] - batch_i[0]
+        batch_size_accum += batch_i[1] - batch_i[0]
         sub_batches.append(batch_i)
-        if batch_size > 1000 or ii >= train_size-1:
+        if batch_size_accum > 2000 or ii >= train_size-1:
             obsv = dataset_obsv[sub_batches[0][0]:sub_batches[-1][1]]
             pred = dataset_pred[sub_batches[0][0]:sub_batches[-1][1]]
             sub_batches = sub_batches - sub_batches[0][0]
@@ -436,40 +426,42 @@ for epoch in range(start_epoch, 500000 + 1):
             # l2_loss.backward()
             # predictor_optimizer.step()
 
-
-            zeros = Variable(torch.zeros(int(batch_size), 1) + np.random.uniform(0, 0.2), requires_grad=False).cuda()
-            ones = Variable(torch.ones(int(batch_size), 1) * np.random.uniform(0.8, 1.0), requires_grad=False).cuda()
+            bs = int(batch_size_accum)
+            zeros = Variable(torch.zeros(bs, 1) + np.random.uniform(0, 0.2), requires_grad=False).cuda()
+            ones = Variable(torch.ones(bs, 1) * np.random.uniform(0.8, 1.0), requires_grad=False).cuda()
+            noise = torch.FloatTensor(torch.rand(bs, noise_len)).cuda()
 
             # ============== Train Discriminator ================
             unrolled_steps = 10
             for u in range(unrolled_steps + 1):
                 D.zero_grad()
                 with torch.no_grad():
-                    pred_hat_4d = predict(obsv, n_next, sub_batches)
+                    pred_hat_4d = predict(obsv, noise, n_next, sub_batches)
 
-                fake_labels = D(obsv_4d, pred_hat_4d)  # classify fake samples
+                fake_labels, code_hat = D(obsv_4d, pred_hat_4d)  # classify fake samples
                 d_loss_fake = mse_loss(fake_labels, zeros)
+                d_loss_info = mse_loss(code_hat.squeeze(), noise[:, 0])
 
-                real_labels = D(obsv_4d, pred_4d)  # classify real samples
+                real_labels, code_hat = D(obsv_4d, pred_4d)  # classify real samples
                 d_loss_real = mse_loss(real_labels, ones)
 
-                d_loss = d_loss_fake + d_loss_real
+                d_loss = d_loss_fake + d_loss_real # + d_loss_info
                 d_loss.backward()  # to update D
                 D_optimizer.step()
 
                 if u == 0:
                     backup = copy.deepcopy(D)
 
-                # d_loss_fake_sum += d_loss_fake.item()
-                # d_loss_real_sum += d_loss_real.item()
-
             # =============== Train Generator ================= #
             D.zero_grad()
             predictor_optimizer.zero_grad()
-            pred_hat_4d = predict(obsv, n_next, sub_batches)
+            pred_hat_4d = predict(obsv, noise, n_next, sub_batches)
 
-            gen_labels = D(obsv_4d, pred_hat_4d)  # classify a fake sample
-            g_loss = mse_loss(gen_labels, ones)
+            gen_labels, code_hat = D(obsv_4d, pred_hat_4d)  # classify a fake sample
+            g_loss_l2 = mse_loss(pred_hat_4d[:, :, :2], pred)
+            g_loss_fooling = mse_loss(gen_labels, ones)
+            g_loss_info = mse_loss(code_hat.squeeze(), noise[:, 0])
+            g_loss = g_loss_fooling # + g_loss_l2 # + g_loss_info
             g_loss.backward()
             predictor_optimizer.step()
 
@@ -484,21 +476,130 @@ for epoch in range(start_epoch, 500000 + 1):
                 train_ADE += e
                 train_FDE += err_all[:, -1].sum().item()
 
-            batch_size = 0; sub_batches = []
+            batch_size_accum = 0; sub_batches = []
 
     train_ADE /= n_train_samples
     train_FDE /= n_train_samples
-    if train_ADE < min_train_ADE:
-        min_train_ADE = train_ADE
-    is_best_epoch = train_ADE < min_train_ADE
+    toc = time.clock()
+    print("epc=%4d, Train ADE,FDE = (%.3f, %.3f) | time = %.1f" \
+          % (epoch, train_ADE, train_FDE, toc - tic))
 
-    test_ADE, test_FDE = 0, 0
-    if epoch % 100 == 0:
-        # ============== Save model on disk ===============
-        print('saving model to file ...')
-        save_checkpoint({
+
+def test(write_to_file=False, linear=False):
+    # =========== Test error ============
+    plt.close()
+    n_samples_for_test = 20
+    ade_avg_12, fde_avg_12 = 0, 0
+    ade_min_12, fde_min_12 = 0, 0
+    ade_avg_08, fde_avg_08 = 0, 0
+    ade_min_08, fde_min_08 = 0, 0
+    for ii in range(train_size, len(the_batches)):
+        batch_i = the_batches[ii]
+        obsv = dataset_obsv[batch_i[0]:batch_i[1]]
+        pred = dataset_pred[batch_i[0]:batch_i[1]]
+        current_t = dataset_t[batch_i[0]]
+        bs = int(batch_i[1] - batch_i[0])
+        with torch.no_grad():
+            all_20_errors = []
+            all_20_preds = []
+
+            linear_preds = predict_cv(obsv, n_next)
+            if linear and not write_to_file:
+                all_20_preds.append(linear_preds.unsqueeze(0))
+                err_all = torch.pow((linear_preds[:, :, :2] - pred)/ss, 2).sum(dim=2, keepdim=True).sqrt()
+                all_20_errors.append(err_all.unsqueeze(0))
+            else:
+                for kk in range(n_samples_for_test):
+                    noise = torch.FloatTensor(torch.rand(bs, noise_len)).cuda()
+                    pred_hat_4d = predict(obsv, noise, n_next)
+                    all_20_preds.append(pred_hat_4d.unsqueeze(0))
+                    err_all = torch.pow((pred_hat_4d[:, :, :2] - pred)/ss, 2).sum(dim=2, keepdim=True).sqrt()
+                    all_20_errors.append(err_all.unsqueeze(0))
+
+            all_20_errors = torch.cat(all_20_errors)
+            if write_to_file:
+                file_name = '../preds-iccv/' + dataset_name + '/pred-' + str(current_t) + '.npz'
+                print('saving to ', file_name)
+                np_obsvs = scale.denormalize(obsv[:,:,:2].data.cpu().numpy())
+                np_preds_our = scale.denormalize(torch.cat(all_20_preds)[:,:,:,:2].data.cpu().numpy())
+                np_preds_gtt = scale.denormalize(pred[:,:,:2].data.cpu().numpy())
+                np_preds_lnr = scale.denormalize(linear_preds[:,:,:2].data.cpu().numpy())
+                np.savez(file_name, timestamp=current_t,
+                         obsvs=np_obsvs, preds_our=np_preds_our, preds_gtt=np_preds_gtt, preds_lnr=np_preds_lnr)
+
+            # =============== Prediction Errors ================
+            fde_min_12_i, _ = all_20_errors[:, :, -1].min(0, keepdim=True)
+            ade_min_12_i, _ = all_20_errors.mean(2).min(0, keepdim=True)
+            fde_min_12 += fde_min_12_i.sum().item()
+            ade_min_12 += ade_min_12_i.sum().item()
+            fde_avg_12 += all_20_errors[:, :, -1].mean(0, keepdim=True).sum().item()
+            ade_avg_12 += all_20_errors.mean(2).mean(0, keepdim=True).sum().item()
+
+            fde_min_8_i, _ = all_20_errors[:, :, :8][:, :, -1].min(0, keepdim=True)
+            ade_min_8_i, _ = all_20_errors[:, :, :8].mean(2).min(0, keepdim=True)
+            fde_min_08 += fde_min_8_i.sum().item()
+            ade_min_08 += ade_min_8_i.sum().item()
+            fde_avg_08 += all_20_errors[:, :, :8][:, :, -1].mean(0, keepdim=True).sum().item()
+            ade_avg_08 += all_20_errors[:, :, :8].mean(2).mean(0, keepdim=True).sum().item()
+            # ==================================================
+
+        # if DEBUG_PREDS and np.random.rand() > 0.9:
+        #     obsv_np = obsv.cpu().data.numpy() / ss + np.array([min_x, min_y])
+        #     pred_np = pred.cpu().data.numpy() / ss + np.array([min_x, min_y])
+        #     plt.plot(obsv_np[:, :, 0].transpose(), obsv_np[:, :, 1].transpose(), 'b')
+        #     plt.plot(pred_np[:, :, 0].transpose(), pred_np[:, :, 1].transpose(), 'g')
+        #
+        #     for __ in range(20):
+        #         noise = torch.FloatTensor(torch.rand(bs, noise_len)).cuda()
+        #         pred_hat_4d = predict(obsv, noise, n_next)
+        #         pred_hat_4d = pred_hat_4d[:, :, :2].cpu().data.numpy() / ss + np.array([min_x, min_y])
+        #         plt.plot(pred_hat_4d[:, :, 0].transpose(), pred_hat_4d[:, :, 1].transpose(), 'r--', alpha=0.2)
+        #     plt.xlim([min_x, max_x])
+        #     plt.ylim([min_y, max_y])
+        #     plt.show()
+    ade_avg_08 /= n_test_samples
+    fde_avg_08 /= n_test_samples
+    ade_min_08 /= n_test_samples
+    fde_min_08 /= n_test_samples
+    ade_avg_12 /= n_test_samples
+    fde_avg_12 /= n_test_samples
+    ade_min_12 /= n_test_samples
+    fde_min_12 /= n_test_samples
+    print('Avg ADE,FDE (08)= (%.3f, %.3f) | Min(20) ADE,FDE (08)= (%.3f, %.3f)' \
+          % (ade_avg_08, fde_avg_08, ade_min_08, fde_min_08))
+    print('Avg ADE,FDE (12)= (%.3f, %.3f) | Min(20) ADE,FDE (12)= (%.3f, %.3f)' \
+          % (ade_avg_12, fde_avg_12, ade_min_12, fde_min_12))
+
+
+# =======================================================
+# ===================== M A I N =========================
+# =======================================================
+if os.path.isfile(model_file):
+    checkpoint = torch.load(model_file)
+    start_epoch = checkpoint['epoch'] + 1
+    attention.load_state_dict(checkpoint['attentioner_dict'])
+    encoder.load_state_dict(checkpoint['lstm_encoder_dict'])
+    decoder.load_state_dict(checkpoint['predictor_dict'])
+    predictor_optimizer.load_state_dict(checkpoint['pred_optimizer'])
+
+    D.load_state_dict(checkpoint['D_dict'])
+    D_optimizer.load_state_dict(checkpoint['D_optimizer'])
+else:
+    min_train_ADE = 10000
+    start_epoch = 1
+
+test(write_to_file=True)
+exit(1)
+
+# ===================== TRAIN =========================
+for epoch in range(start_epoch, 500000 + 1):
+    train()
+
+    # ============== Save model on disk ===============
+    if epoch % 50 == 0:
+        print('Saving model to file ...', model_file)
+        torch.save({
             'epoch': epoch,
-            'min_error': min_train_ADE,
             'attentioner_dict': attention.state_dict(),
             'lstm_encoder_dict': encoder.state_dict(),
             'predictor_dict': decoder.state_dict(),
@@ -506,39 +607,7 @@ for epoch in range(start_epoch, 500000 + 1):
 
             'D_dict': D.state_dict(),
             'D_optimizer': D_optimizer.state_dict()
-        }, is_best_epoch, model_file)
+        }, model_file)
 
-        # =========== Test error ============
-        plt.close()
-        DEBUG_PREDS = train_ADE < 0.52
-
-        for ii in range(train_size, len(the_batches)):
-            batch_i = the_batches[ii]
-            obsv = dataset_obsv[batch_i[0]:batch_i[1]]
-            pred = dataset_pred[batch_i[0]:batch_i[1]]
-            with torch.no_grad():
-                pred_hat_4d = predict(obsv, n_next)
-                err_all = torch.pow(ss * (pred_hat_4d[:, :, :2] - pred), 2).sum(dim=2).sqrt()
-                test_ADE += err_all.sum().item() / n_next
-                test_FDE += err_all[:, -1].sum().item()
-
-            if DEBUG_PREDS and np.random.rand() > 0.9:
-                obsv_np = obsv.cpu().data.numpy() * ss + np.array([min_x, min_y])
-                pred_np = pred.cpu().data.numpy() * ss + np.array([min_x, min_y])
-                plt.plot(obsv_np[:, :, 0].transpose(), obsv_np[:, :, 1].transpose(), 'b')
-                plt.plot(pred_np[:, :, 0].transpose(), pred_np[:, :, 1].transpose(), 'g')
-
-                for __ in range(20):
-                    pred_hat_4d = predict(obsv, n_next)
-                    pred_hat_4d = pred_hat_4d[:, :, :2].cpu().data.numpy() * ss + np.array([min_x, min_y])
-                    plt.plot(pred_hat_4d[:, :, 0].transpose(), pred_hat_4d[:, :, 1].transpose(), 'r--', alpha=0.5)
-                plt.xlim([min_x, max_x])
-                plt.ylim([min_y, max_y])
-                plt.show()
-        test_ADE /= n_test_samples
-        test_FDE /= n_test_samples
-    toc = time.clock()
-    print("epc=%4d, Train ADE,FDE = (%.3f, %.3f) | Test ADE,FDE = (%.3f, %.3f) time = %.1f" \
-          % (epoch, train_ADE, train_FDE, test_ADE, test_FDE, toc - tic))
 
 

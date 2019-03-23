@@ -19,46 +19,56 @@ print('writing to ' + out_dir)
 log_1NN = open(out_dir + '/log_1NN.txt', "w+")
 log_1NN.write('real,  fake,  total\n')
 
-n_samples = 128 # 256
+n_samples = 512
 n_past = 2
 n_next = 2
 noise_vec_len = 32
 samples_len = n_past + n_next
-n_modes = 3
-n_conditions = 6
-real_samples = []
 
-for ii in range(n_samples):
-    data_angle = (ii * n_conditions) // n_samples * (360 / n_conditions)
-    data_angle = data_angle * np.pi / 180
 
-    x0 = math.cos(data_angle) * 8
-    y0 = math.sin(data_angle) * 8
-    x1 = math.cos(data_angle) * 6
-    y1 = math.sin(data_angle) * 6
+def create_toy_dataset(n_samples, save=False):
+    real_samples = []
+    timesteps = []
+    n_modes = 3
+    n_conditions = 6
+    for ii in range(n_samples):
+        selected_way = (ii * n_conditions) // n_samples
+        timestep_ii = ((ii * n_conditions) % n_samples) // n_conditions * 4
+        data_angle = selected_way * (360 / n_conditions)
+        data_angle = data_angle * np.pi / 180
 
-    fixed_turn = ((ii % n_modes) - 1) * 20 * np.pi / 180
-    p2_turn_rand = np.random.randn(1) * 1.5 * np.pi / 180
-    p3_turn_rand = np.random.randn(1) * 2.5 * np.pi / 180
+        x0 = math.cos(data_angle) * 8
+        y0 = math.sin(data_angle) * 8
+        x1 = math.cos(data_angle) * 6
+        y1 = math.sin(data_angle) * 6
 
-    x2 = math.cos(data_angle + fixed_turn + p2_turn_rand) * 4
-    y2 = math.sin(data_angle + fixed_turn + p2_turn_rand) * 4
+        fixed_turn = ((ii % n_modes) - 1) * 20 * np.pi / 180
+        p2_turn_rand = np.random.randn(1) * 1.5 * np.pi / 180
+        p3_turn_rand = np.random.randn(1) * 2.5 * np.pi / 180
 
-    x3 = math.cos(data_angle + fixed_turn + p2_turn_rand + p3_turn_rand) * 2
-    y3 = math.sin(data_angle + fixed_turn + p2_turn_rand + p3_turn_rand) * 2
+        x2 = math.cos(data_angle + fixed_turn + p2_turn_rand) * 4
+        y2 = math.sin(data_angle + fixed_turn + p2_turn_rand) * 4
 
-    real_samples.append(np.array([[x0, y0], [x1, y1], [x2, y2], [x3, y3]]))
-real_samples = np.array(real_samples) / 8
+        x3 = math.cos(data_angle + fixed_turn + p2_turn_rand + p3_turn_rand) * 2
+        y3 = math.sin(data_angle + fixed_turn + p2_turn_rand + p3_turn_rand) * 2
 
-with open(out_dir + '/ground-truth.csv', 'w+') as gt_file:
-    gt_file.write('% each row contains n points: x(1), y(1), ... y(n)\n')
-    for sam in real_samples:
-        sam = np.reshape(sam, (-1, 1))
-        # gt_file.write("".join(map(str, sam)) + "\n")
-        for val in sam:
-            gt_file.write("%.4f, " % val[0])
-        gt_file.write("\n")
-    gt_file.close()
+        real_samples.append(np.array([[x0, y0], [x1, y1], [x2, y2], [x3, y3]]))
+        timesteps.append(np.array([timestep_ii, timestep_ii+1, timestep_ii+2, timestep_ii+3]))
+
+    real_samples = np.array(real_samples) / 8
+
+    if save:
+        with open(out_dir + '/toy-dataset-f2.txt', 'w+') as gt_file:
+            # gt_file.write('% each row contains n points: x(1), y(1), ... y(n)\n')
+            for ii, sample in enumerate(real_samples):
+                sample = np.reshape(sample, (-1, 2))
+                # gt_file.write("".join(map(str, sam)) + "\n")
+                for tt, val in enumerate(sample):
+                    gt_file.write("%.1f %.1f %.3f %.3f\n" % (timesteps[ii][tt], ii+1, val[0], val[1]))
+                # gt_file.write("\n")
+            gt_file.close()
+    return real_samples
+
 
 def compute_wasserstein(reals, fakes):
     n_reals = len(reals)
@@ -214,6 +224,9 @@ last_epc = -1
 last_kld = -1
 last_emd = -1
 
+real_samples = create_toy_dataset(n_samples, save=True)
+exit(1)
+
 train_data = TensorDataset(torch.FloatTensor(real_samples[:, :n_past]),
                            torch.FloatTensor(real_samples[:, n_past:]))
 train_loader = DataLoader(train_data, batch_size=n_samples, shuffle=True, num_workers=1)
@@ -328,10 +341,10 @@ for epc in trange(1, 100000+1):
 
         with open(out_dir + '/out-%05d.csv' % epc, 'w+') as out_csv_file:
             out_csv_file.write('% each row contains n points: x(1), y(1), ... y(n)\n')
-            for sam in gen_samples:
-                sam = np.reshape(sam, (-1, 1))
+            for sample in gen_samples:
+                sample = np.reshape(sample, (-1, 1))
                 # gt_file.write("".join(map(str, sam)) + "\n")
-                for val in sam:
+                for val in sample:
                     out_csv_file.write("%.4f, " % val[0])
                 out_csv_file.write("\n")
             out_csv_file.close()

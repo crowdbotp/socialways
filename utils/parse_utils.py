@@ -33,12 +33,20 @@ class Scale(object):
         else:
             data_copy = np.copy(data)
 
-        if shift:
-            data_copy[:, 0] = (data[:, 0] - self.min_x) * self.sx
-            data_copy[:, 1] = (data[:, 1] - self.min_y) * self.sy
+        if data.ndim == 1:
+            data_copy[0] = (data[0] - self.min_x * shift) * self.sx
+            data_copy[1] = (data[1] - self.min_y * shift) * self.sy
+        elif data.ndim == 2:
+            data_copy[:, 0] = (data[:, 0] - self.min_x * shift) * self.sx
+            data_copy[:, 1] = (data[:, 1] - self.min_y * shift) * self.sy
+        elif data.ndim == 3:
+            data_copy[:, :, 0] = (data[:, :, 0] - self.min_x * shift) * self.sx
+            data_copy[:, :, 1] = (data[:, :, 1] - self.min_y * shift) * self.sy
+        elif data.ndim == 4:
+            data_copy[:, :, :, 0] = (data[:, :, :, 0] - self.min_x * shift) * self.sx
+            data_copy[:, :, :, 1] = (data[:, :, :, 1] - self.min_y * shift) * self.sy
         else:
-            data_copy[:, 0] = data[:, 0] * self.sx
-            data_copy[:, 1] = data[:, 1] * self.sy
+            return False
         return data_copy
 
     def denormalize(self, data, shift=True, inPlace=False):
@@ -57,8 +65,85 @@ class Scale(object):
         elif ndim == 3:
             data_copy[:, :, 0] = data[:, :, 0] / self.sx + self.min_x * shift
             data_copy[:, :, 1] = data[:, :, 1] / self.sy + self.min_y * shift
+        elif ndim == 4:
+            data_copy[:, :, :, 0] = data[:, :, :, 0] / self.sx + self.min_x * shift
+            data_copy[:, :, :, 1] = data[:, :, :, 1] / self.sy + self.min_y * shift
+        else:
+            return False
 
         return data_copy
+
+
+class TrajnetParser:
+    def __init__(self):
+        self.scale = Scale()
+        self.all_ids = list()
+        self.actual_fps = 0.
+        self.delimit = ' '
+        self.p_data = []
+        self.v_data = []
+        self.t_data = []
+        self.min_t = int(sys.maxsize)
+        self.max_t = -1
+        self.interval = 6
+
+    def load(self, filename, down_sample=1):
+        pos_data_dict = dict()
+        time_data_dict = dict()
+        self.all_ids.clear()
+
+        # to search for files in a folder?
+        file_names = list()
+        if '*' in filename:
+            files_path = filename[:filename.index('*')]
+            extension = filename[filename.index('*') + 1:]
+            for file in os.listdir(files_path):
+                if file.endswith(extension):
+                    file_names.append(files_path + file)
+        else:
+            file_names.append(filename)
+
+        for file in file_names:
+            with open(file, 'r') as data_file:
+                content = data_file.readlines()
+                id_list = list()
+                for i, row in enumerate(content):
+                    row = row.split(self.delimit)
+                    while '' in row: row.remove('')
+                    if len(row) < 4: continue
+
+                    ts = float(row[0])
+                    id = round(float(row[1]))
+                    if ts % down_sample != 0:
+                        continue
+                    if ts < self.min_t: self.min_t = ts
+                    if ts > self.max_t: self.max_t = ts
+
+                    px = float(row[2])
+                    py = float(row[3])
+
+                    if id not in id_list:
+                        id_list.append(id)
+                        pos_data_dict[id] = list()
+                        time_data_dict[id] = np.empty(0, dtype=int)
+                    pos_data_dict[id].append(np.array([px, py]))
+                    time_data_dict[id] = np.hstack((time_data_dict[id], np.array([ts])))
+            self.all_ids += id_list
+
+        for key, value in pos_data_dict.items():
+            poss_i = np.array(value)
+            self.p_data.append(poss_i)
+            self.t_data.append(np.array(time_data_dict[key]))
+
+        # calc scale
+        for i in range(len(self.p_data)):
+            poss_i = np.array(self.p_data[i])
+            self.scale.min_x = min(self.scale.min_x, min(poss_i[:, 0]))
+            self.scale.max_x = max(self.scale.max_x, max(poss_i[:, 0]))
+            self.scale.min_y = min(self.scale.min_y, min(poss_i[:, 1]))
+            self.scale.max_y = max(self.scale.max_y, max(poss_i[:, 1]))
+        self.scale.calc_scale()
+
 
 
 class BIWIParser:
@@ -84,7 +169,7 @@ class BIWIParser:
         if 'zara' in filename:
             self.delimit = '\t'
 
-        # check to search for many files?
+        # to search for files in a folder?
         file_names = list()
         if '*' in filename:
             files_path = filename[:filename.index('*')]
@@ -135,7 +220,7 @@ class BIWIParser:
             # TODO: you can apply a Kalman filter/smoother on v_data
             vels_i = np.array(vel_data_dict[key])
             self.v_data.append(vels_i)
-            self.t_data.append(np.array(time_data_dict[key]))
+            self.t_data.append(np.array(time_data_dict[key]).astype(np.int32))
 
         # calc scale
         for i in range(len(self.p_data)):
@@ -214,11 +299,6 @@ class SeyfriedParser:
                     v = np.array([px - last_px, py - last_py]) * fps / (ts - last_t + np.finfo(float).eps)
                     vel_data_list[-1].append(v)
                     time_data_list[-1] = np.hstack((time_data_list[-1], np.array([ts])))
-
-                    # FIXME: uncomment if you need instant velocity
-                    #last_px = px
-                    #last_py = py
-                    #last_t = ts
 
         p_data = list()
         v_data = list()
@@ -349,5 +429,5 @@ def create_dataset(p_data, t_data, t_range, n_past=8, n_next=8, max_ped=20):
     dataset_x = np.array(dataset_x).astype(np.float32)
     dataset_y = np.array(dataset_y).astype(np.float32)
 
-    return dataset_x, dataset_y, sub_batches
+    return dataset_x, dataset_y, dataset_t, sub_batches
 
