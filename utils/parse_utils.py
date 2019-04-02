@@ -145,6 +145,86 @@ class TrajnetParser:
         self.scale.calc_scale()
 
 
+class SDD_Parsrer:
+    def __init__(self):
+        self.scale = Scale()
+        self.all_ids = list()
+        self.actual_fps = 0.
+        self.delimit = ' '
+        self.p_data = []
+        self.t_data = []
+        self.min_t = int(sys.maxsize)
+        self.max_t = -1
+        self.interval = 12
+
+    def load(self, filename, down_sample=12):
+        pos_data_dict = dict()
+        vel_data_dict = dict()
+        time_data_dict = dict()
+        self.all_ids.clear()
+
+        if 'zara' in filename:
+            self.delimit = '\t'
+
+        # to search for files in a folder?
+        file_names = list()
+        if '*' in filename:
+            files_path = filename[:filename.index('*')]
+            extension = filename[filename.index('*') + 1:]
+            for file in os.listdir(files_path):
+                if file.endswith(extension):
+                    file_names.append(files_path + file)
+        else:
+            file_names.append(filename)
+
+        self.actual_fps = 2.5
+        for file in file_names:
+            with open(file, 'r') as data_file:
+                content = data_file.readlines()
+                id_list = list()
+                for i, row in enumerate(content):
+                    row = row.split(self.delimit)
+                    while '' in row: row.remove('')
+                    if len(row) < 10: continue
+
+                    id = round(float(row[0]))
+                    ts = float(row[5])
+                    if ts % down_sample != 0: continue
+
+                    xmin = round(float(row[1]))
+                    ymin = round(float(row[2]))
+                    xmax = round(float(row[3]))
+                    ymax = round(float(row[4]))
+
+                    if ts < self.min_t: self.min_t = ts
+                    if ts > self.max_t: self.max_t = ts
+
+                    px = (xmin + xmax) / 2
+                    py = (ymin + ymax) / 2
+
+                    if id not in id_list:
+                        id_list.append(id)
+                        pos_data_dict[id] = list()
+                        time_data_dict[id] = np.empty(0, dtype=int)
+                        last_t = ts
+                    pos_data_dict[id].append(np.array([px, py]))
+                    time_data_dict[id] = np.hstack((time_data_dict[id], np.array([ts])))
+            self.all_ids += id_list
+
+        for key, value in pos_data_dict.items():
+            poss_i = np.array(value)
+            self.p_data.append(poss_i)
+            self.t_data.append(np.array(time_data_dict[key]).astype(np.int32))
+
+        # calc scale
+        for i in range(len(self.p_data)):
+            poss_i = np.array(self.p_data[i])
+            self.scale.min_x = min(self.scale.min_x, min(poss_i[:, 0]))
+            self.scale.max_x = max(self.scale.max_x, max(poss_i[:, 0]))
+            self.scale.min_y = min(self.scale.min_y, min(poss_i[:, 1]))
+            self.scale.max_y = max(self.scale.max_y, max(poss_i[:, 1]))
+        self.scale.calc_scale()
+
 
 class BIWIParser:
     def __init__(self):

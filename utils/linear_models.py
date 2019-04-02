@@ -1,7 +1,8 @@
 from pykalman import KalmanFilter
 import numpy as np
+import torch
 import matplotlib.pyplot as plt
-from src.parse_utils import SeyfriedParser, BIWIParser
+from .parse_utils import SeyfriedParser, BIWIParser
 
 
 class MyKalman:
@@ -65,7 +66,7 @@ class MyKalman:
         return smoothed_state_means[:, 0:2], smoothed_state_means[:, 2:4]
 
 
-def test(seyfried=False, biwi=False):
+def test_kalman(seyfried=False, biwi=False):
     if seyfried:
         parser = SeyfriedParser()
         pos_data, vel_data, _ = parser.load('../data/sey01.sey', down_sample=1)
@@ -112,5 +113,19 @@ def smooth_and_store(filename_in, filename_out):
     pass
 
 
+def predict_cv(obsv, n_next):
+    n_past = obsv.shape[1]
+    if n_past > 2:
+        my_vel = (obsv[:, -1] - obsv[:, -3]) / 2.
+    else:
+        my_vel = (obsv[:, -1] - obsv[:, -2])
+
+    for si in range(n_next):
+        pred_hat = obsv[:, -1] + my_vel
+        obsv = torch.cat((obsv, pred_hat.unsqueeze(1)), dim=1)
+    pred_hat = obsv[:, n_past:, :]
+    return pred_hat
+
+
 if __name__ == '__main__':
-    test(biwi=True)
+    test_kalman(biwi=True)

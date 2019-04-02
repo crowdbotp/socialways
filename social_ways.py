@@ -6,19 +6,75 @@ import torch
 import numpy as np
 import torch.nn as nn
 import torch.optim as opt
+from tqdm import tqdm, trange
 from itertools import chain
 from torch.autograd import Variable
+from src.utils.parse_utils import Scale
 from torch.utils.data import DataLoader
-from src.utils.parse_utils import BIWIParser, Scale, create_dataset
+from src.utils.linear_models import predict_cv
 
 
 # ========== set input/output files ============
 dataset_name = 'eth'  # FIXME: Notice to select the proper dataset
-annotation_file = '../data/' + dataset_name + '/obsmat.txt'
+model_name = 'infoGAN-new'
 processed_data_file = '../data/' + dataset_name +'/data_8_12.npz'
-# annotation_file = '../data/trajnet/train/stanford/bookstore.txt'
-# processed_data_file = '../data/trajnet/train/stanford/bookstore_8_12.npz'
-model_file = '../trained_models/iccv_gan_128_' + dataset_name + '.pt'
+# processed_data_file = '../data/' + dataset_name +'/data_2_8.npz' # FIXME: For SDD tests
+model_file = '../trained_models/new_gan_128_' + model_name + '_' + dataset_name + '.pt'
+
+# FIXME: ====== training hyper-parameters ======
+# Unrolled GAN
+n_unrolling_steps = 0
+# Info GAN
+use_info_loss = True
+loss_info_w = 2
+n_latent_codes = 6
+# L2 GAN
+use_l2_loss = False
+use_variety_loss = False
+loss_l2_w = 1  # WARNING for both l2 and variety
+# Learning Rate
+lr_g = 1e-3
+lr_d = 1e-3
+# FIXME: ====== Network Size ===================
+batch_size = 1024
+hidden_size = 128
+n_epochs = 50000
+num_social_features = 1
+social_feature_size = hidden_size // 2
+noise_len = hidden_size // 2
+n_lstm_layers = 1
+# ==============================================
+
+# FIXME: ======= Loda Data =====================
+data = np.load(processed_data_file)
+dataset_obsv, dataset_pred, dataset_t, the_batches = data['obsvs'], data['preds'], data['times'], data['baches']
+train_size = max(1, (len(the_batches) * 4) // 5)
+train_batches = the_batches[:train_size]
+test_batches = the_batches[train_size:]
+n_past = dataset_obsv.shape[1]
+n_next = dataset_pred.shape[1]
+n_train_samples = the_batches[train_size-1][1]
+n_test_samples = dataset_obsv.shape[0] - n_train_samples
+if n_test_samples == 0:
+    n_test_samples = 1
+    the_batches = np.array([the_batches[0], the_batches[0]])
+print(processed_data_file, ' # Training samples: ', n_train_samples)
+
+# normalize
+scale = Scale()
+scale.max_x = max(np.max(dataset_obsv[:, :, 0]), np.max(dataset_pred[:, :, 0]))
+scale.min_x = min(np.min(dataset_obsv[:, :, 0]), np.min(dataset_pred[:, :, 0]))
+scale.max_y = max(np.max(dataset_obsv[:, :, 1]), np.max(dataset_pred[:, :, 1]))
+scale.min_y = min(np.min(dataset_obsv[:, :, 1]), np.min(dataset_pred[:, :, 1]))
+scale.calc_scale(keep_ratio=True)
+dataset_obsv = scale.normalize(dataset_obsv)
+dataset_pred = scale.normalize(dataset_pred)
+ss = scale.sx
+
+# Normalize
+dataset_obsv = torch.FloatTensor(dataset_obsv).cuda()
+dataset_pred = torch.FloatTensor(dataset_pred).cuda()
+# ================================================
 
 
 def get_traj_4d(obsv_p, pred_p):
@@ -32,7 +88,7 @@ def get_traj_4d(obsv_p, pred_p):
     return obsv_4d, pred_4d
 
 
-def cal_error(pred_hat, pred):
+def calc_error(pred_hat, pred):
     N = pred.size(0)
     T = pred.size(1)
     err_all = torch.pow((pred_hat - pred)/ss, 2).sum(dim=2).sqrt()  # N x T
@@ -183,7 +239,7 @@ class EncoderLstm(nn.Module):
 
 
 class Discriminator(nn.Module):
-    def __init__(self, n_next, hidden_dim):
+    def __init__(self, n_next, hidden_dim, n_latent_code):
         super(Discriminator, self).__init__()
         self.lstm_dim = hidden_dim
         self.n_next = n_next
@@ -197,7 +253,7 @@ class Discriminator(nn.Module):
                                         nn.Linear(hidden_dim//2, 1))
 
         self.latent_decoder = nn.Sequential(nn.Linear(self.lstm_dim, self.lstm_dim//2), nn.LeakyReLU(0.2),
-                                        nn.Linear(self.lstm_dim//2, 1))
+                                        nn.Linear(self.lstm_dim//2, n_latent_code))
 
     def forward(self, obsv, pred, sub_batches=[]):
         bs = obsv.size(0)
@@ -275,74 +331,23 @@ class DecoderLstm(nn.Module):
         return out
 
 
-# parser = BIWIParser()
-# parser.load(annotation_file, down_sample=1)
-# interval = 6
-# t_range = range(int(parser.min_t), int(parser.max_t), interval)
-# dataset_obsv, dataset_pred, dataset_t, baches = create_dataset(parser.p_data, parser.t_data, t_range, n_past=8, n_next=12)
-# np.savez(processed_data_file, obsvs=dataset_obsv, preds=dataset_pred, times=dataset_t, baches=baches)
-# exit(1)
-
-data = np.load(processed_data_file)
-dataset_obsv, dataset_pred, dataset_t, the_batches = data['obsvs'], data['preds'], data['times'], data['baches']
-train_size = (len(the_batches) * 4) // 5
-n_next = dataset_pred.shape[1]
-n_train_samples = the_batches[train_size-1][1]
-n_test_samples = dataset_obsv.shape[0] - n_train_samples
-
-print(processed_data_file)
-print('num of train samples = ', n_train_samples)
-
-# normalize
-scale = Scale()
-scale.max_x = max(np.max(dataset_obsv[:, :, 0]), np.max(dataset_pred[:, :, 0]))
-scale.min_x = min(np.min(dataset_obsv[:, :, 0]), np.min(dataset_pred[:, :, 0]))
-scale.max_y = max(np.max(dataset_obsv[:, :, 1]), np.max(dataset_pred[:, :, 1]))
-scale.min_y = min(np.min(dataset_obsv[:, :, 1]), np.min(dataset_pred[:, :, 1]))
-scale.calc_scale(keep_ratio=True)
-ss = scale.sx
-
-# Normalize
-dataset_obsv = scale.normalize(dataset_obsv)
-dataset_pred = scale.normalize(dataset_pred)
-dataset_obsv = torch.FloatTensor(dataset_obsv).cuda()
-dataset_pred = torch.FloatTensor(dataset_pred).cuda()
-
-
-hidden_size = 128
-num_social_features = 1
-social_feature_size = hidden_size // 4
-VEL_VEC_LEN = 2
-noise_len = hidden_size // 4
-n_lstm_layers = 1
 encoder = EncoderLstm(hidden_size, n_lstm_layers).cuda()
 attention = AttentionRel().cuda()
 feature_embedder = EmbedSocialFeatures(num_social_features, social_feature_size).cuda()
 
-# FIXME: choose Decoder Model
-# decoder = DecoderLstm(social_feature_size + VEL_VEC_LEN + noise_len, traj_code_len).cuda()
 decoder = DecoderFC(hidden_size + social_feature_size + noise_len).cuda()
 # decoder = DecoderFCFull(traj_code_len + social_feature_size + noise_len, n_next).cuda()
+# decoder = DecoderLstm(social_feature_size + VEL_VEC_LEN + noise_len, traj_code_len).cuda()
 
 predictor_params = chain(attention.parameters(), encoder.parameters(), decoder.parameters())
-predictor_optimizer = opt.Adamax(predictor_params, lr=0.0002, betas=(0.8, 0.999))
-# optimizer = opt.SGD(predictor_params, lr=0.01, momentum=0.9)
+predictor_optimizer = opt.Adam(predictor_params, lr=lr_g, betas=(0.8, 0.999))
 
-D = Discriminator(n_next, hidden_size).cuda()
-D_optimizer = opt.Adam(D.parameters(), lr=0.0002, betas=(0.8, 0.999))
+D = Discriminator(n_next, hidden_size, n_latent_codes).cuda()
+D_optimizer = opt.Adam(D.parameters(), lr=lr_d, betas=(0.8, 0.999))
 mse_loss = nn.MSELoss()
 bce_loss = nn.BCELoss()
 
-# =========== Baseline Linear Prediction =========
-def predict_cv(obsv, n_next, sub_batches=[]):
-    n_past = obsv.shape[1]
-    for si in range(n_next):
-        my_vel = (obsv[:, -1] - obsv[:, -3]) / 2.
-        pred_hat = obsv[:, -1] + my_vel
-        obsv = torch.cat((obsv, pred_hat.unsqueeze(1)), dim=1)
-    pred_hat = obsv[:, n_past:, :]
-    return pred_hat
-
+print('hidden dim = %d | lr(G) =  %.5f | lr(D) =  %.5f' % (hidden_size, lr_g, lr_d))
 
 def predict(obsv_p, noise, n_next, sub_batches=[]):
     bs = obsv_p.shape[0]
@@ -377,79 +382,56 @@ def predict(obsv_p, noise, n_next, sub_batches=[]):
     return torch.stack(pred_4ds, 1)
 # ===================================================
 
-# ============= Main Prediction Function =============
-# def predict(obsv_p, n_next, sub_batches=[]):
-#     bs = obsv_p.shape[0]
-#     lstm_h_c = (torch.zeros(n_lstm_layers, bs, encoder.hidden_size).cuda(),
-#                 torch.zeros(n_lstm_layers, bs, encoder.hidden_size).cuda())
-#     encoder.init_lstm(lstm_h_c[0], lstm_h_c[1])
-#     obsv_4d = get_traj_4d(obsv_p, [])
-#     lstm_out = encoder(obsv_4d)
-#
-#     emb_sfeatures = torch.FloatTensor(torch.zeros(bs, feature_embedder.hidden_size)).cuda()
-#     noise = torch.FloatTensor(torch.randn((bs, noise_len))).cuda()
-#     # v_hat = decoder(encoder.lstm_h[0].view(bs, -1), emb_sfeatures, noise)
-#     v_hat = decoder(lstm_out[:, -1], emb_sfeatures, noise).view(bs, -1, 2)
-#
-#     p_hat = torch.zeros_like(v_hat)
-#     p_hat_last = obsv_p[:, -1]
-#     for ii in range(n_next):
-#         p_hat[:, ii] = v_hat[:, ii] + p_hat_last  # + obsv_v[:, -1]
-#         p_hat_last = p_hat[:, ii]
-#     # p_hat = v_hat.view(bs, -1, 2) + rr  # + cur_vel
-#
-#     return torch.cat([p_hat, v_hat], dim=2)
-# ===================================================
-
 
 # =============== Training Loop ==================
 def train():
     tic = time.clock()
     train_ADE, train_FDE = 0, 0
     batch_size_accum = 0; sub_batches = []
-    for ii in range(0, train_size, 1):
-        batch_i = the_batches[ii]
-
+    for ii, batch_i in enumerate(train_batches):
         batch_size_accum += batch_i[1] - batch_i[0]
         sub_batches.append(batch_i)
-        if batch_size_accum > 2000 or ii >= train_size-1:
+
+        # FIXME: Just keep it for toy dataset
+        # sub_batches = the_batches
+        # batch_size_accum = sub_batches[-1][1]
+        # ii = train_size-1
+
+        if ii >= train_size-1 or \
+                batch_size_accum + (the_batches[ii+1][1] - the_batches[ii+1][0]) > batch_size:
             obsv = dataset_obsv[sub_batches[0][0]:sub_batches[-1][1]]
             pred = dataset_pred[sub_batches[0][0]:sub_batches[-1][1]]
             sub_batches = sub_batches - sub_batches[0][0]
+            filling_len = batch_size - int(batch_size_accum)
+            obsv = torch.cat((obsv, torch.zeros(filling_len, n_past, 2).cuda()), dim=0)
+            pred = torch.cat((pred, torch.zeros(filling_len, n_next, 2).cuda()), dim=0)
 
             obsv_4d, pred_4d = get_traj_4d(obsv, pred)
-
-            # =========== Supervised Learning =============
-            # pred_hat = predict(obsv, n_next, sub_batches)
-            # predictor_optimizer.zero_grad()
-            # l2_loss = loss_func(pred_hat, pred)
-            # l2_loss.backward()
-            # predictor_optimizer.step()
-
-            bs = int(batch_size_accum)
-            zeros = Variable(torch.zeros(bs, 1) + np.random.uniform(0, 0.2), requires_grad=False).cuda()
-            ones = Variable(torch.ones(bs, 1) * np.random.uniform(0.8, 1.0), requires_grad=False).cuda()
-            noise = torch.FloatTensor(torch.rand(bs, noise_len)).cuda()
+            zeros = Variable(torch.zeros(batch_size, 1) + np.random.uniform(0, 0.1), requires_grad=False).cuda()
+            ones = Variable(torch.ones(batch_size, 1) * np.random.uniform(0.9, 1.0), requires_grad=False).cuda()
+            noise = torch.FloatTensor(torch.rand(batch_size, noise_len)).cuda()
 
             # ============== Train Discriminator ================
-            unrolled_steps = 10
-            for u in range(unrolled_steps + 1):
+            for u in range(n_unrolling_steps + 1):
                 D.zero_grad()
                 with torch.no_grad():
                     pred_hat_4d = predict(obsv, noise, n_next, sub_batches)
 
                 fake_labels, code_hat = D(obsv_4d, pred_hat_4d)  # classify fake samples
                 d_loss_fake = mse_loss(fake_labels, zeros)
-                d_loss_info = mse_loss(code_hat.squeeze(), noise[:, 0])
+                d_loss_info = mse_loss(code_hat.squeeze(), noise[:, :n_latent_codes])
 
                 real_labels, code_hat = D(obsv_4d, pred_4d)  # classify real samples
                 d_loss_real = mse_loss(real_labels, ones)
 
-                d_loss = d_loss_fake + d_loss_real # + d_loss_info
-                d_loss.backward()  # to update D
+                #  FIXME: which loss functinos to use for D?
+                d_loss = d_loss_fake + d_loss_real
+                if use_info_loss:
+                    d_loss += loss_info_w * d_loss_info
+                d_loss.backward()  # update D
                 D_optimizer.step()
 
-                if u == 0:
+                if u == 0 and n_unrolling_steps > 0:
                     backup = copy.deepcopy(D)
 
             # =============== Train Generator ================= #
@@ -460,17 +442,35 @@ def train():
             gen_labels, code_hat = D(obsv_4d, pred_hat_4d)  # classify a fake sample
             g_loss_l2 = mse_loss(pred_hat_4d[:, :, :2], pred)
             g_loss_fooling = mse_loss(gen_labels, ones)
-            g_loss_info = mse_loss(code_hat.squeeze(), noise[:, 0])
-            g_loss = g_loss_fooling # + g_loss_l2 # + g_loss_info
+            g_loss_info = mse_loss(code_hat.squeeze(), noise[:, :n_latent_codes])
+
+            #  FIXME: which loss functinos to use for G?
+            g_loss = g_loss_fooling
+            if use_info_loss:
+                g_loss += loss_info_w * g_loss_info
+            if use_l2_loss:
+                g_loss += loss_l2_w * g_loss_l2
+            if use_variety_loss:
+                KV = 20
+                all_20_losses = []
+                for k in range(KV):
+                    pred_hat_4d = predict(obsv, noise, n_next, sub_batches)
+                    loss_l2_k = mse_loss(pred_hat_4d[k, :, :2], pred[k])
+                all_20_losses.append(loss_l2_k.unsqueeze(0))
+                all_20_losses = torch.cat(all_20_losses)
+                variety_loss, _ = torch.min(all_20_losses, dim=0)
+                g_loss += loss_l2_w * variety_loss
+
             g_loss.backward()
             predictor_optimizer.step()
 
-            D.load(backup)
-            del backup
+            if n_unrolling_steps > 0:
+                D.load(backup)
+                del backup
 
             # calculate error
-            with torch.no_grad():
-                err_all = torch.pow(ss * (pred_hat_4d[:, :, :2] - pred), 2)
+            with torch.no_grad():  # TODO: use the function above
+                err_all = torch.pow((pred_hat_4d[:, :, :2] - pred)/ss, 2)
                 err_all = err_all.sum(dim=2).sqrt()
                 e = err_all.sum().item() / n_next
                 train_ADE += e
@@ -481,20 +481,16 @@ def train():
     train_ADE /= n_train_samples
     train_FDE /= n_train_samples
     toc = time.clock()
-    print("epc=%4d, Train ADE,FDE = (%.3f, %.3f) | time = %.1f" \
+    print(" Epc=%4d, Train ADE,FDE = (%.3f, %.3f) | time = %.1f" \
           % (epoch, train_ADE, train_FDE, toc - tic))
 
 
-def test(write_to_file=False, linear=False):
+def test(n_gen_samples=20, linear=False, write_to_file=None):
     # =========== Test error ============
     plt.close()
-    n_samples_for_test = 20
     ade_avg_12, fde_avg_12 = 0, 0
     ade_min_12, fde_min_12 = 0, 0
-    ade_avg_08, fde_avg_08 = 0, 0
-    ade_min_08, fde_min_08 = 0, 0
-    for ii in range(train_size, len(the_batches)):
-        batch_i = the_batches[ii]
+    for ii, batch_i in enumerate(test_batches):
         obsv = dataset_obsv[batch_i[0]:batch_i[1]]
         pred = dataset_pred[batch_i[0]:batch_i[1]]
         current_t = dataset_t[batch_i[0]]
@@ -509,7 +505,7 @@ def test(write_to_file=False, linear=False):
                 err_all = torch.pow((linear_preds[:, :, :2] - pred)/ss, 2).sum(dim=2, keepdim=True).sqrt()
                 all_20_errors.append(err_all.unsqueeze(0))
             else:
-                for kk in range(n_samples_for_test):
+                for kk in range(n_gen_samples):
                     noise = torch.FloatTensor(torch.rand(bs, noise_len)).cuda()
                     pred_hat_4d = predict(obsv, noise, n_next)
                     all_20_preds.append(pred_hat_4d.unsqueeze(0))
@@ -518,7 +514,7 @@ def test(write_to_file=False, linear=False):
 
             all_20_errors = torch.cat(all_20_errors)
             if write_to_file:
-                file_name = '../preds-iccv/' + dataset_name + '/pred-' + str(current_t) + '.npz'
+                file_name = os.path.join(write_to_file, str(epoch) + '-' + str(current_t) + '.npz')
                 print('saving to ', file_name)
                 np_obsvs = scale.denormalize(obsv[:,:,:2].data.cpu().numpy())
                 np_preds_our = scale.denormalize(torch.cat(all_20_preds)[:,:,:,:2].data.cpu().numpy())
@@ -534,13 +530,6 @@ def test(write_to_file=False, linear=False):
             ade_min_12 += ade_min_12_i.sum().item()
             fde_avg_12 += all_20_errors[:, :, -1].mean(0, keepdim=True).sum().item()
             ade_avg_12 += all_20_errors.mean(2).mean(0, keepdim=True).sum().item()
-
-            fde_min_8_i, _ = all_20_errors[:, :, :8][:, :, -1].min(0, keepdim=True)
-            ade_min_8_i, _ = all_20_errors[:, :, :8].mean(2).min(0, keepdim=True)
-            fde_min_08 += fde_min_8_i.sum().item()
-            ade_min_08 += ade_min_8_i.sum().item()
-            fde_avg_08 += all_20_errors[:, :, :8][:, :, -1].mean(0, keepdim=True).sum().item()
-            ade_avg_08 += all_20_errors[:, :, :8].mean(2).mean(0, keepdim=True).sum().item()
             # ==================================================
 
         # if DEBUG_PREDS and np.random.rand() > 0.9:
@@ -557,16 +546,10 @@ def test(write_to_file=False, linear=False):
         #     plt.xlim([min_x, max_x])
         #     plt.ylim([min_y, max_y])
         #     plt.show()
-    ade_avg_08 /= n_test_samples
-    fde_avg_08 /= n_test_samples
-    ade_min_08 /= n_test_samples
-    fde_min_08 /= n_test_samples
     ade_avg_12 /= n_test_samples
     fde_avg_12 /= n_test_samples
     ade_min_12 /= n_test_samples
     fde_min_12 /= n_test_samples
-    print('Avg ADE,FDE (08)= (%.3f, %.3f) | Min(20) ADE,FDE (08)= (%.3f, %.3f)' \
-          % (ade_avg_08, fde_avg_08, ade_min_08, fde_min_08))
     print('Avg ADE,FDE (12)= (%.3f, %.3f) | Min(20) ADE,FDE (12)= (%.3f, %.3f)' \
           % (ade_avg_12, fde_avg_12, ade_min_12, fde_min_12))
 
@@ -575,6 +558,7 @@ def test(write_to_file=False, linear=False):
 # ===================== M A I N =========================
 # =======================================================
 if os.path.isfile(model_file):
+    print('loading from ' + model_file)
     checkpoint = torch.load(model_file)
     start_epoch = checkpoint['epoch'] + 1
     attention.load_state_dict(checkpoint['attentioner_dict'])
@@ -588,15 +572,19 @@ else:
     min_train_ADE = 10000
     start_epoch = 1
 
-test(write_to_file=True)
-exit(1)
+
+# FIXME: comment here to train
+# wr_dir = '../preds-iccv/' + dataset_name + '/' + model_name + '/' + str(0000)
+# os.makedirs(wr_dir, exist_ok=True)
+# test(n_gen_samples=128, write_to_file=wr_dir)
+# exit(1)
 
 # ===================== TRAIN =========================
-for epoch in range(start_epoch, 500000 + 1):
+for epoch in trange(start_epoch, n_epochs + 1):  # FIXME : set the number of epochs
     train()
 
     # ============== Save model on disk ===============
-    if epoch % 50 == 0:
+    if epoch % 50 == 0:  # FIXME : set the interval for running tests
         print('Saving model to file ...', model_file)
         torch.save({
             'epoch': epoch,
@@ -609,5 +597,8 @@ for epoch in range(start_epoch, 500000 + 1):
             'D_optimizer': D_optimizer.state_dict()
         }, model_file)
 
-
+    if epoch % 1000 == 0:
+        wr_dir = '../preds-iccv/' + dataset_name + '/' + model_name + '/' + str(epoch)
+        os.makedirs(wr_dir, exist_ok=True)
+        test(128, write_to_file=wr_dir)
 

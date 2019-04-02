@@ -13,20 +13,23 @@ from torch.autograd import Variable
 from torch.utils.data import TensorDataset, DataLoader
 
 # ==== Generate sim dataset =====
-out_dir = "../unrolled_2"
-os.makedirs(out_dir, exist_ok=True)
+from src.utils.parse_utils import TrajnetParser, create_dataset
+
+model_name = 'unrolled'
+out_dir = '../toy-tests/' + model_name
 print('writing to ' + out_dir)
-log_1NN = open(out_dir + '/log_1NN.txt', "w+")
+model_file = '../trained_models/iccv-gan-toy-' + model_name + '.pt'
+log_1NN = open(os.path.join(out_dir, 'log_1NN.txt'), "w+")
 log_1NN.write('real,  fake,  total\n')
 
-n_samples = 512
+n_samples = 768
 n_past = 2
 n_next = 2
 noise_vec_len = 32
 samples_len = n_past + n_next
 
 
-def create_toy_dataset(n_samples, save=False):
+def create_toy_dataset(n_samples, save_to=None):
     real_samples = []
     timesteps = []
     n_modes = 3
@@ -57,8 +60,8 @@ def create_toy_dataset(n_samples, save=False):
 
     real_samples = np.array(real_samples) / 8
 
-    if save:
-        with open(out_dir + '/toy-dataset-f2.txt', 'w+') as gt_file:
+    if save_to:
+        with open(save_to, 'w+') as gt_file:
             # gt_file.write('% each row contains n points: x(1), y(1), ... y(n)\n')
             for ii, sample in enumerate(real_samples):
                 sample = np.reshape(sample, (-1, 2))
@@ -210,8 +213,27 @@ def adv_loss(input_, target_):
     _loss = input_.clamp(min=0) - input_ * target_ + (1 + neg_abs.exp()).log()
     return _loss.mean()
 
-
 mse_loss = nn.MSELoss()
+
+real_samples = create_toy_dataset(n_samples, save_to='../data/toy/toy-dataset-768.txt')
+parser = TrajnetParser()
+parser.load('../data/toy/toy-dataset-768.txt', down_sample=1)
+interval = 1
+t_range = range(int(parser.min_t), int(parser.max_t), interval)
+dataset_obsv, dataset_pred, dataset_t, baches = create_dataset(parser.p_data, parser.t_data, t_range, n_past=2, n_next=2)
+np.savez('../data/toy/toy-768.npz', obsvs=dataset_obsv, preds=dataset_pred, times=dataset_t, baches=baches)
+exit()
+
+
+
+# parser = BIWIParser() # = TrajnetParser()
+# parser.load(annotation_file, down_sample=1)
+# interval = 1
+# t_range = range(int(parser.min_t), int(parser.max_t), interval)
+# dataset_obsv, dataset_pred, dataset_t, baches = create_dataset(parser.p_data, parser.t_data, t_range, n_past=8, n_next=12)
+# np.savez(processed_data_file, obsvs=dataset_obsv, preds=dataset_pred, times=dataset_t, baches=baches)
+# exit(1)
+
 
 unrolled_steps = 10
 G = Generator()
@@ -224,14 +246,23 @@ last_epc = -1
 last_kld = -1
 last_emd = -1
 
-real_samples = create_toy_dataset(n_samples, save=True)
-exit(1)
+real_samples = create_toy_dataset(n_samples, save_to=False)
 
 train_data = TensorDataset(torch.FloatTensor(real_samples[:, :n_past]),
                            torch.FloatTensor(real_samples[:, n_past:]))
 train_loader = DataLoader(train_data, batch_size=n_samples, shuffle=True, num_workers=1)
 
-for epc in trange(1, 100000+1):
+if os.path.isfile(model_file):
+    checkpoint = torch.load(model_file)
+    start_epoch = checkpoint['epoch'] + 1
+    G.load_state_dict(checkpoint['G_dict'])
+    D.load_state_dict(checkpoint['D_dict'])
+    g_optimizer.load_state_dict(checkpoint['G_optimizer'])
+    d_optimizer.load_state_dict(checkpoint['D_optimizer'])
+else:
+    start_epoch = 1
+
+for epoch in trange(start_epoch, 100000 + 1):
     d_loss_fake_sum = 0
     d_loss_real_sum = 0
     g_loss_sum = 0
@@ -281,7 +312,17 @@ for epc in trange(1, 100000+1):
 
         # ================================================
         # =================== T E S T ==================== #
-    if (epc % 100) == 0:
+    if (epoch % 1000) == 0:
+        #================= Save to File ===============
+        print('Saving model to file ...', model_name)
+        torch.save({
+            'epoch': epoch,
+            'G_dict': G.state_dict(),
+            'D_dict': D.state_dict(),
+            'G_optimizer': g_optimizer.state_dict(),
+            'D_optimizer': d_optimizer.state_dict()
+        }, model_file)
+
         # ============== Visualize Results ============
         plt.figure(0)
         for i in range(0, n_samples):
@@ -309,16 +350,16 @@ for epc in trange(1, 100000+1):
         EMD = compute_wasserstein(real_samples, gen_samples)
         if last_epc >= 0:
             plt.figure(1)
-            plt.plot([last_epc, epc], [last_emd, EMD], 'b')
+            plt.plot([last_epc, epoch], [last_emd, EMD], 'b')
             plt.xlabel('Epoch')
             plt.title('Wasserstein Distance')
             plt.grid(True, axis='y')
             plt.savefig(os.path.join(out_dir, 'EMD.svg'))
 
             plt.figure(2)
-            gfc_reals_1nn, = plt.plot([last_epc, epc], [last_reals_1NN, Reals_1NN], 'c')
-            gfc_fakse_1nn, = plt.plot([last_epc, epc], [last_fakes_1NN, Fakes_1NN], 'g')
-            gfc_total_1nn, = plt.plot([last_epc, epc], [last_total_1NN, Total_1NN], 'b')
+            gfc_reals_1nn, = plt.plot([last_epc, epoch], [last_reals_1NN, Reals_1NN], 'c')
+            gfc_fakse_1nn, = plt.plot([last_epc, epoch], [last_fakes_1NN, Fakes_1NN], 'g')
+            gfc_total_1nn, = plt.plot([last_epc, epoch], [last_total_1NN, Total_1NN], 'b')
             plt.xlabel('Epoch')
             plt.title('1-NN accuracy')
             plt.legend((gfc_reals_1nn, gfc_fakse_1nn, gfc_total_1nn),
@@ -326,20 +367,20 @@ for epc in trange(1, 100000+1):
             plt.grid(True, axis='y')
             plt.savefig(os.path.join(out_dir, '1NN.svg'))
         # last_kld = KLD
-        last_epc = epc
+        last_epc = epoch
         last_emd = EMD
         last_reals_1NN, last_fakes_1NN, last_total_1NN = Reals_1NN, Fakes_1NN, Total_1NN
         log_1NN.write('%.3f, %.3f, %.3f\n' % (Reals_1NN, Fakes_1NN, Total_1NN))
         log_1NN.flush()
 
         plt.figure(0)
-        plt.title('Epoch = %d' % epc)
+        plt.title('Epoch = %d' % epoch)
         plt.xlim([-1.1, 1.1])
         plt.ylim([-1.1, 1.1])
-        plt.savefig(os.path.join(out_dir, 'out_%05d.png' % epc))
+        plt.savefig(os.path.join(out_dir, 'out_%05d.png' % epoch))
         plt.savefig(os.path.join(out_dir, 'last.svg'))
 
-        with open(out_dir + '/out-%05d.csv' % epc, 'w+') as out_csv_file:
+        with open(out_dir + '/out-%05d.csv' % epoch, 'w+') as out_csv_file:
             out_csv_file.write('% each row contains n points: x(1), y(1), ... y(n)\n')
             for sample in gen_samples:
                 sample = np.reshape(sample, (-1, 1))

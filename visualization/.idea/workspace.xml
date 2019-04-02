@@ -1,7 +1,35 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <project version="4">
   <component name="ChangeListManager">
-    <list default="true" id="706e24d4-2046-4fa0-8a10-f92f5fa30e11" name="Default Changelist" comment="" />
+    <list default="true" id="706e24d4-2046-4fa0-8a10-f92f5fa30e11" name="Default Changelist" comment="">
+      <change afterPath="$PROJECT_DIR$/../test-SDD.py" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/../toy_example.py" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/calc_statistics.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/../CNN_Navigator2.py" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/../CNN_navigator.py" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/../GAN.py" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/../GAN_Info.py" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/../GAN_sim.py" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/../GAN_unrolled.py" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/../build_teoms.py" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/../iccv_gan.py" beforeDir="false" afterPath="$PROJECT_DIR$/../social_ways.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/../lstm_mixer_test.py" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/../lstm_mixer_train.py" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/../lstm_naive_test.py" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/../lstm_naive_train.py" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/../lstm_vanilla.py" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/../models.py" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/../plot_pred_errors.py" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/../test_keep_modes.py" beforeDir="false" afterPath="$PROJECT_DIR$/../test_keep_modes.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/../utils/compare-plots.py" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/../utils/kalman.py" beforeDir="false" afterPath="$PROJECT_DIR$/../utils/linear_models.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/../utils/parse_utils.py" beforeDir="false" afterPath="$PROJECT_DIR$/../utils/parse_utils.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/../utils/test-animation.py" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/.idea/misc.xml" beforeDir="false" afterPath="$PROJECT_DIR$/.idea/misc.xml" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/.idea/visualization-codes.iml" beforeDir="false" afterPath="$PROJECT_DIR$/.idea/visualization-codes.iml" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/.idea/workspace.xml" beforeDir="false" afterPath="$PROJECT_DIR$/.idea/workspace.xml" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/vis.py" beforeDir="false" afterPath="$PROJECT_DIR$/vis.py" afterDir="false" />
+    </list>
     <option name="EXCLUDED_CONVERTED_TO_IGNORED" value="true" />
     <option name="SHOW_DIALOG" value="false" />
     <option name="HIGHLIGHT_CONFLICTS" value="true" />
@@ -38,29 +66,64 @@
         </counts>
       </usages-collector>
     </session>
+    <session id="1512386564">
+      <usages-collector id="statistics.lifecycle.project">
+        <counts>
+          <entry key="project.closed" value="15" />
+          <entry key="project.open.time.0" value="5" />
+          <entry key="project.open.time.2" value="1" />
+          <entry key="project.open.time.3" value="11" />
+          <entry key="project.open.time.4" value="3" />
+          <entry key="project.opened" value="20" />
+        </counts>
+      </usages-collector>
+      <usages-collector id="statistics.file.extensions.edit">
+        <counts>
+          <entry key="Python Console" value="202" />
+          <entry key="dummy" value="19" />
+          <entry key="py" value="8246" />
+        </counts>
+      </usages-collector>
+      <usages-collector id="statistics.file.types.edit">
+        <counts>
+          <entry key="PLAIN_TEXT" value="19" />
+          <entry key="Python" value="8448" />
+        </counts>
+      </usages-collector>
+      <usages-collector id="statistics.file.extensions.open">
+        <counts>
+          <entry key="py" value="16" />
+        </counts>
+      </usages-collector>
+      <usages-collector id="statistics.file.types.open">
+        <counts>
+          <entry key="Python" value="16" />
+        </counts>
+      </usages-collector>
+    </session>
   </component>
   <component name="FileEditorManager">
     <leaf SIDE_TABS_SIZE_LIMIT_KEY="300">
-      <file pinned="false" current-in-tab="true">
+      <file pinned="false" current-in-tab="false">
         <entry file="file://$PROJECT_DIR$/vis.py">
           <provider selected="true" editor-type-id="text-editor">
-            <state relative-caret-position="144">
-              <caret line="34" column="21" selection-start-line="34" selection-start-column="21" selection-end-line="34" selection-end-column="21" />
+            <state relative-caret-position="1298">
+              <caret line="98" column="43" selection-start-line="98" selection-start-column="43" selection-end-line="98" selection-end-column="43" />
               <folding>
                 <element signature="e#0#9#0" expanded="true" />
-                <marker date="1553351930712" expanded="true" signature="923:924" ph="..." />
-                <marker date="1553351930712" expanded="true" signature="1752:1754" ph="..." />
-                <marker date="1553351930712" expanded="true" signature="1781:1909" ph="..." />
+                <element signature="e#142#751#0" />
+                <element signature="e#793#917#0" />
+                <element signature="e#2136#2983#0" />
               </folding>
             </state>
           </provider>
         </entry>
       </file>
-      <file pinned="false" current-in-tab="false">
-        <entry file="file://$PROJECT_DIR$/visualize.py">
+      <file pinned="false" current-in-tab="true">
+        <entry file="file://$PROJECT_DIR$/calc_statistics.py">
           <provider selected="true" editor-type-id="text-editor">
-            <state relative-caret-position="259">
-              <caret line="265" selection-start-line="265" selection-end-line="277" />
+            <state relative-caret-position="142">
+              <caret line="195" selection-start-line="195" selection-end-line="195" />
               <folding>
                 <element signature="e#0#9#0" expanded="true" />
               </folding>
@@ -70,45 +133,55 @@
       </file>
     </leaf>
   </component>
+  <component name="FileTemplateManagerImpl">
+    <option name="RECENT_TEMPLATES">
+      <list>
+        <option value="Python Script" />
+      </list>
+    </option>
+  </component>
   <component name="FindInProjectRecents">
     <findStrings>
       <find>CAP_PROP_POS_MSEC</find>
       <find>POS_FRAMES</find>
       <find>POS_MSEC</find>
+      <find>\\</find>
+      <find>va</find>
+      <find>zar</find>
+      <find>val</find>
+      <find>show</find>
+      <find>draw</find>
+      <find>os.path.join</find>
+      <find>np.load</find>
+      <find>prin</find>
+      <find>copy()</find>
+      <find>copy</find>
     </findStrings>
+  </component>
+  <component name="Git.Settings">
+    <option name="RECENT_GIT_ROOT_PATH" value="$PROJECT_DIR$/.." />
   </component>
   <component name="IdeDocumentHistory">
     <option name="CHANGED_PATHS">
       <list>
         <option value="$PROJECT_DIR$/visualize.py" />
         <option value="$PROJECT_DIR$/vis.py" />
+        <option value="$PROJECT_DIR$/calc_statistics.py" />
       </list>
     </option>
   </component>
   <component name="ProjectFrameBounds" extendedState="6">
-    <option name="x" value="75" />
-    <option name="y" value="24" />
-    <option name="width" value="1828" />
-    <option name="height" value="1056" />
+    <option name="x" value="380" />
+    <option name="y" value="60" />
+    <option name="width" value="1313" />
+    <option name="height" value="1020" />
   </component>
+  <component name="ProjectLevelVcsManager" settingsEditedManually="true" />
   <component name="ProjectView">
     <navigator proportions="" version="1">
       <foldersAlwaysOnTop value="true" />
     </navigator>
-    <panes>
-      <pane id="ProjectPane">
-        <subPane>
-          <expand>
-            <path>
-              <item name="visualization-codes" type="b2602c69:ProjectViewProjectNode" />
-              <item name="visualization-codes" type="462c0819:PsiDirectoryNode" />
-            </path>
-          </expand>
-          <select />
-        </subPane>
-      </pane>
-      <pane id="Scope" />
-    </panes>
+    <panes />
   </component>
   <component name="PropertiesComponent">
     <property name="SearchEverywhereHistoryKey" value="&#9;FILE&#9;file:///home/jamirian/workspace/crowd_sim/ped-prediction-py/visualization-codes/visualize.py" />
@@ -127,7 +200,28 @@
       </list>
     </option>
   </component>
-  <component name="RunManager">
+  <component name="RunManager" selected="Python.calc_statistics">
+    <configuration name="calc_statistics" type="PythonConfigurationType" factoryName="Python" temporary="true">
+      <module name="visualization-codes" />
+      <option name="INTERPRETER_OPTIONS" value="" />
+      <option name="PARENT_ENVS" value="true" />
+      <envs>
+        <env name="PYTHONUNBUFFERED" value="1" />
+      </envs>
+      <option name="SDK_HOME" value="" />
+      <option name="WORKING_DIRECTORY" value="$PROJECT_DIR$" />
+      <option name="IS_MODULE_SDK" value="true" />
+      <option name="ADD_CONTENT_ROOTS" value="true" />
+      <option name="ADD_SOURCE_ROOTS" value="true" />
+      <option name="SCRIPT_NAME" value="$PROJECT_DIR$/calc_statistics.py" />
+      <option name="PARAMETERS" value="" />
+      <option name="SHOW_COMMAND_LINE" value="false" />
+      <option name="EMULATE_TERMINAL" value="false" />
+      <option name="MODULE_MODE" value="false" />
+      <option name="REDIRECT_INPUT" value="false" />
+      <option name="INPUT_FILE" value="" />
+      <method v="2" />
+    </configuration>
     <configuration name="vis" type="PythonConfigurationType" factoryName="Python" temporary="true">
       <module name="visualization-codes" />
       <option name="INTERPRETER_OPTIONS" value="" />
@@ -149,8 +243,13 @@
       <option name="INPUT_FILE" value="" />
       <method v="2" />
     </configuration>
+    <list>
+      <item itemvalue="Python.vis" />
+      <item itemvalue="Python.calc_statistics" />
+    </list>
     <recent_temporary>
       <list>
+        <item itemvalue="Python.calc_statistics" />
         <item itemvalue="Python.vis" />
       </list>
     </recent_temporary>
@@ -169,22 +268,23 @@
     <servers />
   </component>
   <component name="ToolWindowManager">
-    <frame x="65" y="-4" width="1855" height="1084" extended-state="6" />
+    <frame x="-1" y="-11" width="1922" height="1092" extended-state="6" />
+    <editor active="true" />
     <layout>
-      <window_info content_ui="combo" id="Project" order="0" visible="true" weight="0.12227074" />
+      <window_info content_ui="combo" id="Project" order="0" weight="0.11128405" />
       <window_info id="Structure" order="1" side_tool="true" weight="0.25" />
       <window_info id="Favorites" order="2" side_tool="true" />
       <window_info anchor="bottom" id="Message" order="0" />
-      <window_info anchor="bottom" id="Find" order="1" />
-      <window_info anchor="bottom" id="Run" order="2" weight="0.3296146" />
-      <window_info anchor="bottom" id="Debug" order="3" weight="0.3995943" />
+      <window_info anchor="bottom" id="Find" order="1" weight="0.32825205" />
+      <window_info active="true" anchor="bottom" id="Run" order="2" visible="true" weight="0.32012194" />
+      <window_info anchor="bottom" id="Debug" order="3" weight="0.4644309" />
       <window_info anchor="bottom" id="Cvs" order="4" weight="0.25" />
       <window_info anchor="bottom" id="Inspection" order="5" weight="0.4" />
       <window_info anchor="bottom" id="TODO" order="6" />
       <window_info anchor="bottom" id="Version Control" order="7" show_stripe_button="false" />
-      <window_info active="true" anchor="bottom" id="Terminal" order="8" visible="true" weight="0.3296146" />
+      <window_info anchor="bottom" id="Terminal" order="8" weight="0.3294979" />
       <window_info anchor="bottom" id="Event Log" order="9" side_tool="true" />
-      <window_info anchor="bottom" id="Python Console" order="10" />
+      <window_info anchor="bottom" id="Python Console" order="10" weight="0.3294979" />
       <window_info anchor="right" id="Commander" internal_type="SLIDING" order="0" type="SLIDING" weight="0.4" />
       <window_info anchor="right" id="Ant Build" order="1" weight="0.25" />
       <window_info anchor="right" content_ui="combo" id="Hierarchy" order="2" weight="0.25" />
@@ -192,6 +292,87 @@
   </component>
   <component name="VcsContentAnnotationSettings">
     <option name="myLimit" value="2678400000" />
+  </component>
+  <component name="XDebuggerManager">
+    <breakpoint-manager>
+      <breakpoints>
+        <line-breakpoint enabled="true" suspend="THREAD" type="python-line">
+          <url>file://$PROJECT_DIR$/calc_statistics.py</url>
+          <line>129</line>
+          <option name="timeStamp" value="15" />
+        </line-breakpoint>
+        <line-breakpoint enabled="true" suspend="THREAD" type="python-line">
+          <url>file://$PROJECT_DIR$/vis.py</url>
+          <line>233</line>
+          <option name="timeStamp" value="19" />
+        </line-breakpoint>
+        <line-breakpoint enabled="true" suspend="THREAD" type="python-line">
+          <url>file://$PROJECT_DIR$/calc_statistics.py</url>
+          <line>159</line>
+          <option name="timeStamp" value="23" />
+        </line-breakpoint>
+        <line-breakpoint enabled="true" suspend="THREAD" type="python-line">
+          <url>file://$PROJECT_DIR$/calc_statistics.py</url>
+          <line>31</line>
+          <option name="timeStamp" value="33" />
+        </line-breakpoint>
+        <line-breakpoint enabled="true" suspend="THREAD" type="python-line">
+          <url>file://$PROJECT_DIR$/calc_statistics.py</url>
+          <line>133</line>
+          <option name="timeStamp" value="34" />
+        </line-breakpoint>
+        <line-breakpoint enabled="true" suspend="THREAD" type="python-line">
+          <url>file://$PROJECT_DIR$/calc_statistics.py</url>
+          <line>212</line>
+          <option name="timeStamp" value="44" />
+        </line-breakpoint>
+        <line-breakpoint enabled="true" suspend="THREAD" type="python-line">
+          <url>file://$PROJECT_DIR$/calc_statistics.py</url>
+          <line>125</line>
+          <option name="timeStamp" value="59" />
+        </line-breakpoint>
+        <line-breakpoint enabled="true" suspend="THREAD" type="python-line">
+          <url>file://$PROJECT_DIR$/calc_statistics.py</url>
+          <line>205</line>
+          <option name="timeStamp" value="60" />
+        </line-breakpoint>
+        <line-breakpoint enabled="true" suspend="THREAD" type="python-line">
+          <url>file://$PROJECT_DIR$/calc_statistics.py</url>
+          <line>204</line>
+          <option name="timeStamp" value="61" />
+        </line-breakpoint>
+        <line-breakpoint enabled="true" suspend="THREAD" type="python-line">
+          <url>file://$PROJECT_DIR$/vis.py</url>
+          <line>154</line>
+          <option name="timeStamp" value="64" />
+        </line-breakpoint>
+        <line-breakpoint enabled="true" suspend="THREAD" type="python-line">
+          <url>file://$PROJECT_DIR$/vis.py</url>
+          <line>220</line>
+          <option name="timeStamp" value="67" />
+        </line-breakpoint>
+        <line-breakpoint enabled="true" suspend="THREAD" type="python-line">
+          <url>file://$PROJECT_DIR$/vis.py</url>
+          <line>207</line>
+          <option name="timeStamp" value="68" />
+        </line-breakpoint>
+        <line-breakpoint enabled="true" suspend="THREAD" type="python-line">
+          <url>file://$PROJECT_DIR$/vis.py</url>
+          <line>129</line>
+          <option name="timeStamp" value="69" />
+        </line-breakpoint>
+      </breakpoints>
+      <breakpoints-dialog>
+        <breakpoints-dialog />
+      </breakpoints-dialog>
+      <default-breakpoints>
+        <breakpoint type="python-exception">
+          <properties notifyOnTerminate="true" exception="BaseException">
+            <option name="notifyOnTerminate" value="true" />
+          </properties>
+        </breakpoint>
+      </default-breakpoints>
+    </breakpoint-manager>
   </component>
   <component name="editorHistoryManager">
     <entry file="file:///usr/lib/python3.5/tkinter/__init__.py">
@@ -215,25 +396,68 @@
         </state>
       </provider>
     </entry>
-    <entry file="file://$PROJECT_DIR$/visualize.py">
+    <entry file="file://$PROJECT_DIR$/visualize.py" />
+    <entry file="file://$USER_HOME$/python-envs/opencv/lib/python3.5/site-packages/numpy/lib/npyio.py">
       <provider selected="true" editor-type-id="text-editor">
-        <state relative-caret-position="259">
-          <caret line="265" selection-start-line="265" selection-end-line="277" />
-          <folding>
-            <element signature="e#0#9#0" expanded="true" />
-          </folding>
+        <state relative-caret-position="178">
+          <caret line="244" selection-start-line="244" selection-end-line="244" />
+        </state>
+      </provider>
+    </entry>
+    <entry file="file://$APPLICATION_HOME_DIR$/helpers/pydev/_pydevd_bundle/pydevd_breakpoints.py">
+      <provider selected="true" editor-type-id="text-editor">
+        <state relative-caret-position="193">
+          <caret line="100" selection-start-line="100" selection-end-line="100" />
+        </state>
+      </provider>
+    </entry>
+    <entry file="file://$USER_HOME$/python-envs/opencv/lib/python3.5/genericpath.py">
+      <provider selected="true" editor-type-id="text-editor">
+        <state relative-caret-position="383">
+          <caret line="142" selection-start-line="142" selection-end-line="142" />
+        </state>
+      </provider>
+    </entry>
+    <entry file="file://$USER_HOME$/python-envs/opencv/lib/python3.5/site-packages/numpy/lib/format.py">
+      <provider selected="true" editor-type-id="text-editor">
+        <state relative-caret-position="-1391">
+          <caret line="628" selection-start-line="628" selection-end-line="628" />
+        </state>
+      </provider>
+    </entry>
+    <entry file="file://$APPLICATION_HOME_DIR$/helpers/pydev/pydevd.py">
+      <provider selected="true" editor-type-id="text-editor">
+        <state relative-caret-position="413">
+          <caret line="1663" selection-start-line="1663" selection-end-line="1663" />
+        </state>
+      </provider>
+    </entry>
+    <entry file="file://$USER_HOME$/python-envs/opencv/lib/python3.5/codecs.py">
+      <provider selected="true" editor-type-id="text-editor">
+        <state relative-caret-position="391">
+          <caret line="310" selection-start-line="310" selection-end-line="310" />
         </state>
       </provider>
     </entry>
     <entry file="file://$PROJECT_DIR$/vis.py">
       <provider selected="true" editor-type-id="text-editor">
-        <state relative-caret-position="144">
-          <caret line="34" column="21" selection-start-line="34" selection-start-column="21" selection-end-line="34" selection-end-column="21" />
+        <state relative-caret-position="1298">
+          <caret line="98" column="43" selection-start-line="98" selection-start-column="43" selection-end-line="98" selection-end-column="43" />
           <folding>
             <element signature="e#0#9#0" expanded="true" />
-            <marker date="1553351930712" expanded="true" signature="923:924" ph="..." />
-            <marker date="1553351930712" expanded="true" signature="1752:1754" ph="..." />
-            <marker date="1553351930712" expanded="true" signature="1781:1909" ph="..." />
+            <element signature="e#142#751#0" />
+            <element signature="e#793#917#0" />
+            <element signature="e#2136#2983#0" />
+          </folding>
+        </state>
+      </provider>
+    </entry>
+    <entry file="file://$PROJECT_DIR$/calc_statistics.py">
+      <provider selected="true" editor-type-id="text-editor">
+        <state relative-caret-position="142">
+          <caret line="195" selection-start-line="195" selection-end-line="195" />
+          <folding>
+            <element signature="e#0#9#0" expanded="true" />
           </folding>
         </state>
       </provider>
