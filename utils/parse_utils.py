@@ -446,13 +446,11 @@ def to_supervised(data, n_in=1, n_out=1, diff_in=False, diff_out=True, drop_nan=
     return agg.values
 
 
-def create_dataset(p_data, t_data, t_range, n_past=8, n_next=8, max_ped=20):
-    dataset_t = []
+def create_dataset(p_data, t_data, t_range, n_past=8, n_next=12):
+    dataset_t0 = []
     dataset_x = []
     dataset_y = []
     for t in range(t_range.start, t_range.stop, 1):
-        found_peds_x = []
-        found_peds_y = []
         for i in range(len(t_data)):
             t0_ind = (np.where(t_data[i] == t))[0]
             tP_ind = (np.where(t_data[i] == t - t_range.step * n_past))[0]
@@ -465,25 +463,15 @@ def create_dataset(p_data, t_data, t_range, n_past=8, n_next=8, max_ped=20):
             tP_ind = tP_ind[0]
             tF_ind = tF_ind[0]
 
-            dataset_t.append(t)
+            dataset_t0.append(t)
             dataset_x.append(p_data[i][tP_ind:t0_ind])
             dataset_y.append(p_data[i][t0_ind:tF_ind + 1])
 
-            # found_peds_x.append(p_data[i][tP_ind:t0_ind])
-            # found_peds_y.append(p_data[i][t0_ind:tF_ind + 1])
-
-        # if len(found_peds_x) == 0:
-        #     continue
-        # for _ in range(len(found_peds_y), max_ped):
-        #     found_peds_x.append(np.ones((n_past, 2)) * -1)
-        #     found_peds_y.append(np.ones((n_next, 2)) * -1)
-        # dataset_X.append(found_peds_x)
-        # dataset_Y.append(found_peds_y)
 
     sub_batches = []
     last_included_t = -1000
     min_interval = 1
-    for i, t in enumerate(dataset_t):
+    for i, t in enumerate(dataset_t0):
         if t > last_included_t + min_interval:
             sub_batches.append([i, i+1])
             last_included_t = t
@@ -509,5 +497,5 @@ def create_dataset(p_data, t_data, t_range, n_past=8, n_next=8, max_ped=20):
     dataset_x = np.array(dataset_x).astype(np.float32)
     dataset_y = np.array(dataset_y).astype(np.float32)
 
-    return dataset_x, dataset_y, dataset_t, sub_batches
+    return dataset_x, dataset_y, dataset_t0, sub_batches
 

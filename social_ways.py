@@ -9,36 +9,35 @@ import torch.optim as opt
 from tqdm import tqdm, trange
 from itertools import chain
 from torch.autograd import Variable
-from src.utils.parse_utils import Scale
+from utils.parse_utils import Scale
 from torch.utils.data import DataLoader
-from src.utils.linear_models import predict_cv
+from utils.linear_models import predict_cv
 
 
 # ========== set input/output files ============
-dataset_name = 'eth'  # FIXME: Notice to select the proper dataset
-model_name = 'infoGAN-new'
-processed_data_file = '../data/' + dataset_name +'/data_8_12.npz'
-# processed_data_file = '../data/' + dataset_name +'/data_2_8.npz' # FIXME: For SDD tests
-model_file = '../trained_models/new_gan_128_' + model_name + '_' + dataset_name + '.pt'
+dataset_name = 'toy'  # FIXME: Notice to select the proper dataset
+model_name = 'Variety20'
+processed_data_file = '../data/' + dataset_name +'/data.npz'
+model_file = '/home/jamirian/workspace/social-ways/trained_models/cvprww_gan_' + model_name + '_' + dataset_name + '.pt'
 
 # FIXME: ====== training hyper-parameters ======
 # Unrolled GAN
 n_unrolling_steps = 0
 # Info GAN
-use_info_loss = True
-loss_info_w = 2
-n_latent_codes = 6
+use_info_loss = False
+loss_info_w = 1
+n_latent_codes = 2
 # L2 GAN
 use_l2_loss = False
-use_variety_loss = False
-loss_l2_w = 1  # WARNING for both l2 and variety
+use_variety_loss = True
+loss_l2_w = 0.1  # WARNING for both l2 and variety
 # Learning Rate
-lr_g = 1e-3
-lr_d = 1e-3
+lr_g = 1E-4
+lr_d = 1E-4
 # FIXME: ====== Network Size ===================
-batch_size = 1024
-hidden_size = 128
-n_epochs = 50000
+batch_size = 128
+hidden_size = 64
+n_epochs = 100
 num_social_features = 1
 social_feature_size = hidden_size // 2
 noise_len = hidden_size // 2
@@ -46,8 +45,10 @@ n_lstm_layers = 1
 # ==============================================
 
 # FIXME: ======= Loda Data =====================
+print(os.path.dirname(os.path.realpath(__file__)))
+
 data = np.load(processed_data_file)
-dataset_obsv, dataset_pred, dataset_t, the_batches = data['obsvs'], data['preds'], data['times'], data['baches']
+dataset_obsv, dataset_pred, dataset_t, the_batches = data['obsvs'], data['preds'], data['times'], data['batches']
 train_size = max(1, (len(the_batches) * 4) // 5)
 train_batches = the_batches[:train_size]
 test_batches = the_batches[train_size:]
@@ -96,7 +97,7 @@ def calc_error(pred_hat, pred):
     ADEs = torch.cumsum(FDEs)
     for ii in range(T):
         ADEs[ii] /= (ii+1)
-    return ADEs.data().cpu().numpy(), FDEs.data().cpu().numpy()
+    return ADEs.data.cpu().numpy(), FDEs.data().cpu().numpy()
 
 
 class AttentionRel(nn.Module):
@@ -249,10 +250,9 @@ class Discriminator(nn.Module):
         self.pred_encoder = nn.Sequential(nn.Linear(n_next*4, hidden_dim//2), nn.LeakyReLU(0.2),
                                           nn.Linear(hidden_dim//2, hidden_dim//2))
         self.classifier = nn.Sequential(nn.Linear(hidden_dim, hidden_dim//2), nn.LeakyReLU(0.2),
-                                        # nn.Linear(self.lstm_dim//2, self.lstm_dim//2), nn.LeakyReLU(0.2),
                                         nn.Linear(hidden_dim//2, 1))
 
-        self.latent_decoder = nn.Sequential(nn.Linear(self.lstm_dim, self.lstm_dim//2), nn.LeakyReLU(0.2),
+        self.latent_decoder = nn.Sequential(nn.Linear(hidden_dim, hidden_dim//2), nn.LeakyReLU(0.2),
                                         nn.Linear(self.lstm_dim//2, n_latent_code))
 
     def forward(self, obsv, pred, sub_batches=[]):
@@ -393,9 +393,9 @@ def train():
         sub_batches.append(batch_i)
 
         # FIXME: Just keep it for toy dataset
-        # sub_batches = the_batches
-        # batch_size_accum = sub_batches[-1][1]
-        # ii = train_size-1
+        sub_batches = the_batches
+        batch_size_accum = sub_batches[-1][1]
+        ii = train_size-1
 
         if ii >= train_size-1 or \
                 batch_size_accum + (the_batches[ii+1][1] - the_batches[ii+1][0]) > batch_size:
@@ -491,6 +491,7 @@ def test(n_gen_samples=20, linear=False, write_to_file=None):
     ade_avg_12, fde_avg_12 = 0, 0
     ade_min_12, fde_min_12 = 0, 0
     for ii, batch_i in enumerate(test_batches):
+        if ii > 20: break
         obsv = dataset_obsv[batch_i[0]:batch_i[1]]
         pred = dataset_pred[batch_i[0]:batch_i[1]]
         current_t = dataset_t[batch_i[0]]
@@ -597,8 +598,8 @@ for epoch in trange(start_epoch, n_epochs + 1):  # FIXME : set the number of epo
             'D_optimizer': D_optimizer.state_dict()
         }, model_file)
 
-    if epoch % 1000 == 0:
-        wr_dir = '../preds-iccv/' + dataset_name + '/' + model_name + '/' + str(epoch)
+    if epoch % 5 == 0:
+        wr_dir = '/home/jamirian/workspace/social-ways/preds-cvprw/' + dataset_name + '/' + model_name + '/' + str(epoch)
         os.makedirs(wr_dir, exist_ok=True)
         test(128, write_to_file=wr_dir)
 

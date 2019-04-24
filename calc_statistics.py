@@ -1,8 +1,7 @@
 import os
 import numpy as np
-import matplotlib.pyplot as plt
-# import seaborn as sns; sns.set()
 import scipy.optimize as op
+import matplotlib.pyplot as plt
 
 
 def compute_1nn(reals, fakes, obsv_len=2):
@@ -31,13 +30,6 @@ def compute_1nn(reals, fakes, obsv_len=2):
             for jj in range(ii+1, n_mixed):
                 diff = mixed_sampels[ii][0][obsv_len:] - mixed_sampels[jj][0][obsv_len:]
                 dij = np.mean(np.sqrt(np.sum(np.power(diff, 2), 1)))
-
-                # sA = mixed_sampels[ii][0]
-                # sB = mixed_sampels[jj][0]
-                # if sA[0, 0] - sB[0, 0] > 0.001:
-                #     continue
-                # dij = np.math.sqrt((sA[2, 0] - sB[2, 0]) ** 2 + (sA[2, 1] - sB[2, 1]) ** 2 + \
-                #                 (sA[3, 0] - sB[3, 0]) ** 2 + (sA[3, 1] - sB[3, 1]) ** 2)
                 D[ii, jj], D[jj, ii] = dij, dij
 
         for ii in range(0, n_mixed):
@@ -102,9 +94,6 @@ def calc_and_store_stats(main_dir):
             K = real_samples.shape[0]
             fake_obsvs = np.concatenate([fake_obsvs.reshape((1, nPed, 2, 2)) for _ in range(K)], axis=0)
             fake_samples = np.concatenate((fake_obsvs.reshape(-1, 2, 2), fake_preds[:K].reshape(-1, 2, 2)), axis=1)
-            # fake_preds_gtt = data['preds_gtt']
-            # fake_preds_lnr = data['preds_lnr']
-            # fake_time_stamp = data['timestamp']
 
             # fake_samples = fake_samples[:K]
             stat_1nn = compute_1nn(real_samples.reshape(K, nPed, n_past+n_next, 2), fake_samples.reshape(K, nPed, n_past+n_next, 2))
@@ -130,23 +119,28 @@ def calc_and_store_stats(main_dir):
     np.savez(stats_file, stats_1nn=stats_1nn_list, stats_wst=stats_wst_list)
 
 
-def plot_stats_1nn(K_data=-1, interval=1):
+def plot_stats_1nn(K_data=-1, interval=1, ind=-1):
     stats_data = np.load(stats_file)
     stats_1nn = stats_data['stats_1nn']
     if K_data == -1: K_data = len(stats_1nn)
     epc = [50 * nItr * (i+1) for i in range(0, K_data, interval)]
     stats_1nn = [stats_1nn[i] * 100 for i in range(0, K_data, interval)]
-    label, = plt.plot(epc, stats_1nn, '--x', LineWidth=2)
+    label, = plt.plot(epc, stats_1nn, args[ind], LineWidth=1)
+    plt.fill_between(epc, stats_1nn, np.ones_like(stats_1nn) * 50, color=colors[ind], alpha=0.2)
+    print(epc)
+    print(stats_1nn)
     return label
 
 
-def plot_stats_wst(K_data=-1, interval=1):
+def plot_stats_wst(K_data=-1, interval=1, ind=-1):
     stats_data = np.load(stats_file)
     stats_wst = stats_data['stats_wst']
     if K_data == -1: K_data = len(stats_wst)
     epc = [50 * nItr * (i+1) for i in range(len(stats_wst))]
-    stats_wst = [stats_wst[i] for i in range(0, K_data, interval)]
-    label, = plt.plot(epc[:K_data], stats_wst[:K_data], '--v', LineWidth=2)
+    stats_wst = [stats_wst[i] * 1 for i in range(0, K_data, interval)]
+    label, = plt.plot(epc[:K_data], stats_wst[:K_data], args[ind], LineWidth=1)
+    plt.fill_between(epc[:K_data], stats_wst[:K_data], np.zeros_like(stats_wst)[:K_data] , color=colors[ind], alpha=0.2)
+
     return label
 
 
@@ -167,11 +161,10 @@ def plot_dataset():
     exit(1)
 
 
-dataset_file = '../../data/toy/toy-768.npz'
+dataset_file = '../data/toy/toy-768.npz'
 real = np.load(dataset_file)
 real_obsv, real_pred, = real['obsvs'], real['preds']
 real_samples = np.concatenate((real_obsv, real_pred), axis=1)
-
 # plot_dataset()
 #FIXME
 
@@ -183,20 +176,20 @@ n_past = real_obsv.shape[1]
 n_next = real_pred.shape[1]
 
 # FIXME
-main_dirs = ('../../preds-iccv/toy/infoGAN',
-            '../../preds-iccv/toy/info+Unrolled5',
-            # '../../preds-iccv/toy/Unrolled2',
-            # '../../preds-iccv/toy/Unrolled4',
-            '../../preds-iccv/toy/Unrolled10',
-            '../../preds-iccv/toy/Unrolled10+L2',
-            '../../preds-iccv/toy/VanillaGAN',
-            '../../preds-iccv/toy/Vanilla+L2',
-            '../../preds-iccv/toy/Variety20',
-             )
+main_dirs = (
+            '../preds-iccv/toy/VanillaGAN',
+            '../preds-iccv/toy/L2-GAN',
+            '../preds-iccv/toy/SGAN-V20',
+            '../preds-iccv/toy/Unrolled10+L2',
+            '../preds-iccv/toy/Info+Unrolled5',
+            '../preds-iccv/toy/Unrolled10',
+            '../preds-iccv/toy/InfoGAN',
+            )
 
 
-
-fig = plt.figure(figsize=(24, 8), dpi=60, facecolor='w', edgecolor='k')
+colors = ['red', 'green', 'blue', 'cyan', 'yellow', 'magenta', 'black', 'orange', 'brown']
+args = ['r--x', 'g--o', 'b--*', 'c--^', 'y--v', 'm--+', 'k--*', 'r--s', 'r-->']
+fig = plt.figure(figsize=(12, 2.5), dpi=100, facecolor='w', edgecolor='k')
 
 labels = []
 legends = []
@@ -206,21 +199,28 @@ for i, main_dir in enumerate(main_dirs):
     stats_file = os.path.join(main_dir, 'stats' + str(num_samples) + '.npz')
     if not os.path.exists(stats_file):
         calc_and_store_stats(main_dir)
-    #
-    labels.append(plot_stats_1nn(30))
-    plt.ylabel('Accuracy %')
-    #
-    # labels.append(plot_stats_wst(K_data=30))
-    # plt.ylabel('EMD Distance')
-    # plt.ylim([0, .1])
+
+    # labels.append(plot_stats_1nn(30, 1, i))
+    # plt.ylabel('1NN Accuracy %')
+    # plt.ylim([73, 104])
+
+    labels.append(plot_stats_wst(30, 1, i))
+    plt.ylabel('Earth Mover\'s Distance')
+    plt.ylim([-0.005, .12])
 
     legends.append(main_dir[main_dir.rfind('/')+1:])
 
 
-plt.legend(labels, legends)
-plt.xlabel('Iteration')
-ax = plt.gca()
-# ax.set_facecolor('xkcd:white')
-# plt.grid(None)
+# plt.xlabel('Iteration')
+plt.xlim([2000, 117000])
+
+plt.legend(labels, legends, loc='lower right')
 plt.grid(color='gray', linestyle='--', linewidth=1, alpha=0.2, axis='y')
+fig.patch.set_visible(False)
+
+ax = plt.gca()
+ax.spines['top'].set_visible(False)
+ax.spines['right'].set_visible(False)
+
+
 plt.show()

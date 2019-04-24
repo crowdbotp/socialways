@@ -48,15 +48,15 @@ def draw_heatmap(im, pred_data, cmap):
     plt.gca().yaxis.set_major_locator(plt.NullLocator())
     # heatmap = np.fromstring(fig.canvas.tostring_rgb(), dtype=np.uint8, sep='')
     # heatmap = heatmap.reshape(fig.canvas.get_width_height()[::-1] + (3,))
-    plt.savefig('../../tmp.png')
-    heatmap = cv2.imread('../../tmp.png')
-    cv2.addWeighted(im, 0.4, heatmap, 1, 0, im)
+    plt.savefig('../tmp.png')
+    heatmap = cv2.imread('../tmp.png')
+    cv2.addWeighted(im, 1, heatmap, 1, 0, im)
 
 
 def draw_gt_data(im): # SDD dataset
     # FIXME: set dataset file
-    SDD_dataset = '../../data/trajnet/train/stanford/nexus_9.npz'
-    SDD_dataset = '../../data/trajnet/train/stanford/hyang_6.npz'
+    SDD_dataset = '../data/trajnet/train/stanford/nexus_9.npz'
+    SDD_dataset = '../data/trajnet/train/stanford/hyang_6.npz'
 
     dataset = np.load(SDD_dataset)
     obsvs = dataset['dataset_x']
@@ -80,25 +80,26 @@ def draw_gt_data(im): # SDD dataset
         line_cv(im, obsv_XY, (30, 100, 0), 3)
 
 
-dataset_name = "gate2"  # FIXME : dataset name
+dataset_name = "toy"  # FIXME : dataset name
 
 # FIXME : set prediction-folder
-# preds_dir = '../../preds-iccv/' + 'toy/2000'  # + str(current_t) + '.npz'
-# preds_dir = '../../preds-iccv/toy/just_l2/1000'
-# preds_dir = '../../preds-iccv/toy/just_l2_20/500'
-# preds_dir = '../../preds-iccv/eth'
-# preds_dir = '../../preds-iccv/toy/info16-u10/90000'
-# preds_dir = '../../preds-iccv/toy/infogan/800'
-# preds_dir = '../../preds-iccv/toy/info-pure-128/1100'
-# preds_dir = '../../preds-iccv/toy/l2-w50-128/1100'
-# preds_dir = '../../preds-iccv/toy/info-u5-128/1100'
-# preds_dir = '../../preds-iccv/hyang6/unrolled10/5200'
-# preds_dir = '../../preds-iccv/hyang6/info/5500'
-# preds_dir = '../../preds-iccv/hyang6/info/10000'
-# preds_dir = '../../preds-iccv/hyang6/vanilla'
-preds_dir = '../../preds-iccv/gate2/vanilla/5500'
+# preds_dir = '../preds-iccv/eth/infoGAN-i2/1000'
+# preds_dir = '../preds-iccv/' + 'toy/2000'  # + str(current_t) + '.npz'
+# preds_dir = '../preds-iccv/toy/just_l2/1000'
+# preds_dir = '../preds-iccv/toy/just_l2_20/500'
+# preds_dir = '../preds-iccv/eth'
+# preds_dir = '../preds-iccv/toy/info16-u10/90000'
+# preds_dir = '../preds-iccv/toy/infogan/800'
+# preds_dir = '../preds-iccv/toy/info-pure-128/1100'
+# preds_dir = '../preds-iccv/toy/l2-w50-128/1100'
+# preds_dir = '../preds-iccv/toy/info-u5-128/1100'
+# preds_dir = '../preds-iccv/hyang6/unrolled10/5200'
+# preds_dir = '../preds-iccv/hyang6/info/5500'
+# preds_dir = '../preds-iccv/hyang6/info/10000'
+# preds_dir = '../preds-iccv/hyang6/vanilla'
+# preds_dir = '../preds-iccv/gate2/vanilla/5500'
 
-# preds_dir = '../../preds-iccv/toy'
+preds_dir = '../preds-cvprw/toy'
 
 
 im_size = (960, 960, 3)
@@ -111,16 +112,16 @@ im_size = (480, 480, 3)
 
 
 # FIXME : for real datasets, load the video file
-homography_file = os.path.join('../../data/' + dataset_name, 'H.txt')
+homography_file = os.path.join('../data/' + dataset_name, 'H.txt')
 if os.path.exists(homography_file):
     Hinv = np.linalg.inv(np.loadtxt(homography_file))
 
-video_file = '../../data/' + dataset_name + '/video.avi'  # FIXME: for BIWI
-image_file = '../../data/' + dataset_name + '/reference.jpg'   # FIXME
+video_file = '../data/' + dataset_name + '/video.avi'  # FIXME: for BIWI
+image_file = '../data/' + dataset_name + '/reference.jpg'   # FIXME
 if os.path.exists(video_file):
     cap = cv2.VideoCapture()
     time_offset = -12
-if os.path.exists(image_file):
+elif os.path.exists(image_file):
     cap = None
     use_ref_im = True
 
@@ -143,6 +144,10 @@ if os.path.exists(image_file):
 else:
     cap = None
     use_ref_im = False
+    ref_im = cv2.imread(image_file)
+    Hinv[0, 0], Hinv[1, 1] = 200, 200
+    Hinv[0, 2], Hinv[1, 2] = 240, 240
+
 
 
 for dirpath, dirnames, filenames in sorted(os.walk(preds_dir)):
@@ -151,8 +156,8 @@ for dirpath, dirnames, filenames in sorted(os.walk(preds_dir)):
         filename = os.path.join(dirpath, f)
 
         # FIXME
-        out_file = '../../outputs-cvprw/' + filename[filename.rfind('preds-iccv/') + 11:-3] + 'png'
-        # if os.path.exists(out_file): continue
+        out_file = '../outputs-cvprw/' + filename[filename.rfind('preds-cvprw/') + 11:-3] + 'png'
+        if os.path.exists(out_file): continue
 
         data = np.load(filename)
         obsvs = data['obsvs']
@@ -191,11 +196,11 @@ for dirpath, dirnames, filenames in sorted(os.walk(preds_dir)):
         # cv2.imshow('im', im)
         # cv2.waitKeyEx()
 
-
+        cmap = sns.dark_palette("purple")
+        draw_heatmap(im, preds_our_aug, cmap)
         # draw_gt_data(im) # FIXME
         for ii in range(nPed):
-            im = np.copy(ref_im)
-            cmap = sns.dark_palette("purple")
+            # im = np.copy(ref_im)
 
             # if ii != 3: continue
             # cmap = sns.dark_palette((260, 10*ii, 60), input="husl")
@@ -209,17 +214,17 @@ for dirpath, dirnames, filenames in sorted(os.walk(preds_dir)):
 
             # FIXME
             # line_cv(im, pred_lnr_XY, (0, 100, 155), 1)
-            line_cv(im, pred_gtt_XY, (255, 255, 0), 1)
-            draw_heatmap(im, np.expand_dims(preds_our_aug[:, ii], 1), cmap)
+            # line_cv(im, pred_gtt_XY, (255, 255, 0), 1)
+            # draw_heatmap(im, np.expand_dims(preds_our_aug[:, ii], 1), cmap)
 
             # cv2.imshow('im', im)
             # cv2.waitKeyEx()
             # exit(1)
 
-            out_dir = out_file[:out_file.rfind('/')]
-            os.makedirs(out_dir, exist_ok=True)
-            cv2.imwrite(out_file[:-4] + str(ii) + '.png', im)
-            print('writing image to ', out_file[:-4] + str(ii) + '.png')
+        out_dir = out_file[:out_file.rfind('/')]
+        os.makedirs(out_dir, exist_ok=True)
+        cv2.imwrite(out_file, im)
+        print('writing image to ', out_file)
 
         # draw_heatmap(im, preds_our_aug, cmap)
 

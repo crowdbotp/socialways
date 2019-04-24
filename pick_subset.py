@@ -1,10 +1,10 @@
-from src.utils.parse_utils import SDD_Parsrer
+from utils.parse_utils import SDD_Parsrer
 import matplotlib.pyplot as plt
 import numpy as np
 import os
 
 parser = SDD_Parsrer()
-data_dir = '/home/jamirian/workspace/crowd_sim/ped-prediction-py/data/annotations/gates/video3'
+data_dir = '../data/annotations/gates/video3'
 
 parser.load(os.path.join(data_dir, 'annotations.txt'))
 p_data = parser.p_data
