@@ -26,6 +26,10 @@ def line_cv(im, ll, value, width):
         cv2.line(im, (ll[tt][1], ll[tt][0]), (ll[tt + 1][1], ll[tt + 1][0]), value, width)
 
 
+def text_cv(im, text, org, value):
+    cv2.putText(im, text, org, fontFace=cv2.FONT_HERSHEY_DUPLEX, fontScale=0.8, color=value)
+
+
 def draw_heatmap(im, pred_data, cmap):
     nSmp = pred_data.shape[0]
     nPed = pred_data.shape[1]
@@ -98,11 +102,12 @@ dataset_name = "toy"  # FIXME : dataset name
 # preds_dir = '../preds-iccv/hyang6/info/10000'
 # preds_dir = '../preds-iccv/hyang6/vanilla'
 # preds_dir = '../preds-iccv/gate2/vanilla/5500'
+# preds_dir = '../preds-cvprw/toy'
 
-preds_dir = '../preds-cvprw/toy'
 
-
-im_size = (960, 960, 3)
+# FIXME : For toy dataset
+preds_dir = '../medium/toy/UnrolledGAN'
+out_dir_main = '../medium/figs/UnrolledGAN/'
 
 # FIXME : For toy dataset
 Hinv = np.eye(3)
@@ -136,27 +141,28 @@ elif os.path.exists(image_file):
     Hinv[0, 1], Hinv[1, 0], Hinv[2, 2] = 1, 1, 1
     # Hinv[0, 2], Hinv[1, 2] = 550, 720
 
-    # Hinv = np.zeros((3, 3))
-    # Hinv[0, 1], Hinv[1, 0] = 1, 1
-    # Hinv[2, 2] = 1
-    # Hinv[0, 1], Hinv[1, 0] = 19.23, 19.23
-    # Hinv[0, 2], Hinv[1, 2] = -200, -500
-else:
+else:  # toy dataset
     cap = None
     use_ref_im = False
     ref_im = cv2.imread(image_file)
     Hinv[0, 0], Hinv[1, 1] = 200, 200
     Hinv[0, 2], Hinv[1, 2] = 240, 240
 
-
-
+epc_counter = 0
 for dirpath, dirnames, filenames in sorted(os.walk(preds_dir)):
     for file_cntr, f in enumerate(sorted(filenames)):
         if 'stats' in f or not 'npz' in f: continue
         filename = os.path.join(dirpath, f)
 
+        epc_str = f[:f.rfind('-')]
+        if epc_str.isdigit():
+            epc = int(epc_str)
+        else:
+            epc = epc_counter
+            epc_counter += 1
+
         # FIXME
-        out_file = '../outputs-cvprw/' + filename[filename.rfind('preds-cvprw/') + 11:-3] + 'png'
+        out_file = out_dir_main + '%05d' % epc + '.png'
         if os.path.exists(out_file): continue
 
         data = np.load(filename)
@@ -186,7 +192,7 @@ for dirpath, dirnames, filenames in sorted(os.walk(preds_dir)):
         elif use_ref_im:
             im = np.copy(ref_im)
         else:
-            im = np.ones(im_size, dtype=np.uint8) * 50
+            im = np.ones(im_size, dtype=np.uint8) * 1
 
         preds_gtt_aug = np.concatenate((obsvs[:, -1].reshape((nPed, 1, 2)), preds_gtt), axis=1)
         preds_lnr_aug = np.concatenate((obsvs[:, -1].reshape((nPed, 1, 2)), preds_lnr), axis=1)
@@ -199,6 +205,9 @@ for dirpath, dirnames, filenames in sorted(os.walk(preds_dir)):
         cmap = sns.dark_palette("purple")
         draw_heatmap(im, preds_our_aug, cmap)
         # draw_gt_data(im) # FIXME
+
+        text_cv(im, 'Epoch= %05d' %epc, (15, 50), (50,50,250))
+
         for ii in range(nPed):
             # im = np.copy(ref_im)
 
@@ -207,12 +216,12 @@ for dirpath, dirnames, filenames in sorted(os.walk(preds_dir)):
             # im = np.ones(im_size, dtype=np.uint8) * 1
 
             obsv_XY = to_image_frame(Hinv, obsvs[ii])
-            obsv_XY[:,1] = obsv_XY[:,1]
-            pred_lnr_XY = to_image_frame(Hinv, preds_lnr_aug[ii])
-            pred_gtt_XY = to_image_frame(Hinv, preds_gtt_aug[ii])
+            # obsv_XY[:,1] = obsv_XY[:,1]
             line_cv(im, obsv_XY, (255, 20, 0), 2)
 
             # FIXME
+            # pred_lnr_XY = to_image_frame(Hinv, preds_lnr_aug[ii])
+            # pred_gtt_XY = to_image_frame(Hinv, preds_gtt_aug[ii])
             # line_cv(im, pred_lnr_XY, (0, 100, 155), 1)
             # line_cv(im, pred_gtt_XY, (255, 255, 0), 1)
             # draw_heatmap(im, np.expand_dims(preds_our_aug[:, ii], 1), cmap)

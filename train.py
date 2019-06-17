@@ -16,28 +16,28 @@ from utils.linear_models import predict_cv
 
 # ========== set input/output files ============
 dataset_name = 'toy'  # FIXME: Notice to select the proper dataset
-model_name = 'Variety20'
+model_name = 'InfoGAN'
 processed_data_file = '../data/' + dataset_name +'/data.npz'
-model_file = '/home/jamirian/workspace/social-ways/trained_models/cvprww_gan_' + model_name + '_' + dataset_name + '.pt'
+model_file = '../trained_models/medium_' + model_name + '_' + dataset_name + '.pt'
 
 # FIXME: ====== training hyper-parameters ======
 # Unrolled GAN
 n_unrolling_steps = 0
 # Info GAN
-use_info_loss = False
-loss_info_w = 1
+use_info_loss = True
+loss_info_w = 0.5
 n_latent_codes = 2
 # L2 GAN
 use_l2_loss = False
-use_variety_loss = True
-loss_l2_w = 0.1  # WARNING for both l2 and variety
+use_variety_loss = False
+loss_l2_w = 0.5  # WARNING for both l2 and variety
 # Learning Rate
 lr_g = 1E-4
 lr_d = 1E-4
 # FIXME: ====== Network Size ===================
 batch_size = 128
 hidden_size = 64
-n_epochs = 100
+n_epochs = 100000
 num_social_features = 1
 social_feature_size = hidden_size // 2
 noise_len = hidden_size // 2
@@ -48,7 +48,8 @@ n_lstm_layers = 1
 print(os.path.dirname(os.path.realpath(__file__)))
 
 data = np.load(processed_data_file)
-dataset_obsv, dataset_pred, dataset_t, the_batches = data['obsvs'], data['preds'], data['times'], data['batches']
+dataset_obsv, dataset_pred, dataset_t, the_batches = \
+    data['obsvs'], data['preds'], data['times'], data['batches']
 train_size = max(1, (len(the_batches) * 4) // 5)
 train_batches = the_batches[:train_size]
 test_batches = the_batches[train_size:]
@@ -393,9 +394,9 @@ def train():
         sub_batches.append(batch_i)
 
         # FIXME: Just keep it for toy dataset
-        sub_batches = the_batches
-        batch_size_accum = sub_batches[-1][1]
-        ii = train_size-1
+        # sub_batches = the_batches
+        # batch_size_accum = sub_batches[-1][1]
+        # ii = train_size-1
 
         if ii >= train_size-1 or \
                 batch_size_accum + (the_batches[ii+1][1] - the_batches[ii+1][0]) > batch_size:
@@ -485,7 +486,7 @@ def train():
           % (epoch, train_ADE, train_FDE, toc - tic))
 
 
-def test(n_gen_samples=20, linear=False, write_to_file=None):
+def test(n_gen_samples=20, linear=False, write_to_file=None, just_one=False):
     # =========== Test error ============
     plt.close()
     ade_avg_12, fde_avg_12 = 0, 0
@@ -532,21 +533,8 @@ def test(n_gen_samples=20, linear=False, write_to_file=None):
             fde_avg_12 += all_20_errors[:, :, -1].mean(0, keepdim=True).sum().item()
             ade_avg_12 += all_20_errors.mean(2).mean(0, keepdim=True).sum().item()
             # ==================================================
+        if just_one: break
 
-        # if DEBUG_PREDS and np.random.rand() > 0.9:
-        #     obsv_np = obsv.cpu().data.numpy() / ss + np.array([min_x, min_y])
-        #     pred_np = pred.cpu().data.numpy() / ss + np.array([min_x, min_y])
-        #     plt.plot(obsv_np[:, :, 0].transpose(), obsv_np[:, :, 1].transpose(), 'b')
-        #     plt.plot(pred_np[:, :, 0].transpose(), pred_np[:, :, 1].transpose(), 'g')
-        #
-        #     for __ in range(20):
-        #         noise = torch.FloatTensor(torch.rand(bs, noise_len)).cuda()
-        #         pred_hat_4d = predict(obsv, noise, n_next)
-        #         pred_hat_4d = pred_hat_4d[:, :, :2].cpu().data.numpy() / ss + np.array([min_x, min_y])
-        #         plt.plot(pred_hat_4d[:, :, 0].transpose(), pred_hat_4d[:, :, 1].transpose(), 'r--', alpha=0.2)
-        #     plt.xlim([min_x, max_x])
-        #     plt.ylim([min_y, max_y])
-        #     plt.show()
     ade_avg_12 /= n_test_samples
     fde_avg_12 /= n_test_samples
     ade_min_12 /= n_test_samples
@@ -599,7 +587,7 @@ for epoch in trange(start_epoch, n_epochs + 1):  # FIXME : set the number of epo
         }, model_file)
 
     if epoch % 5 == 0:
-        wr_dir = '/home/jamirian/workspace/social-ways/preds-cvprw/' + dataset_name + '/' + model_name + '/' + str(epoch)
+        wr_dir = '../medium/' + dataset_name + '/' + model_name + '/' + str(epoch)
         os.makedirs(wr_dir, exist_ok=True)
-        test(128, write_to_file=wr_dir)
+        test(128, write_to_file=wr_dir, just_one=True)
 

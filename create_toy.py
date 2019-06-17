@@ -2,14 +2,14 @@ import numpy as np
 import matplotlib.pyplot as plt
 
 
-def create_samples(n_samples):
+def create_samples(n_samples, n_per_batch=2):
     samples = []
     time_stamps = []
     for ii in range(n_samples):
         selected_way = (ii * n_conditions) // n_samples
         data_angle = selected_way * (360 / n_conditions)
-        w_i = selected_way % (n_conditions/2)
-        t0 = (ii % (n_samples // n_conditions) + w_i * (n_samples // n_conditions)) * 4
+        w_i = selected_way % (n_conditions/n_per_batch)
+        t0 = ii % (n_samples // n_conditions) + w_i * (n_samples // n_conditions)
         data_angle = data_angle * np.pi / 180
 
         x0 = np.cos(data_angle) * 8
@@ -28,7 +28,7 @@ def create_samples(n_samples):
         y3 = np.sin(data_angle + fixed_turn + p2_turn_rand + p3_turn_rand) * 2
 
         samples.append(np.array([[x0, y0], [x1, y1], [x2, y2], [x3, y3]]))
-        time_stamps.append(np.array([t0, t0+1, t0+2, t0+3]))
+        time_stamps.append(np.array([t0*4, t0*4+1, t0*4+2, t0*4+3]))
 
     samples = np.array(samples) / 8
 
@@ -51,9 +51,11 @@ def write_to_file(real_samples, timesteps, filename):
 if __name__ == '__main__':
     n_modes = 3
     n_conditions = 6
-    n_samples = 768
-    samples, time_stamps = create_samples(n_samples)
-    write_to_file(samples, time_stamps, '../toy.txt')
+    n_samples =  768
+    # samples, time_stamps = create_samples(n_samples, n_per_batch=2)  # train
+    samples, time_stamps = create_samples(n_samples, n_per_batch=6)  # test
+    # FIXME: set output text file
+    write_to_file(samples, time_stamps, '../data/toy/toy.txt')
 
     t_dict = dict()
     for ii in range(n_samples):
@@ -72,7 +74,14 @@ if __name__ == '__main__':
             preds.append(samples[value][2:])
             times.append(time_stamps[value][0])
 
+    obsvs = np.array(obsvs).astype(np.float32)
+    preds = np.array(preds).astype(np.float32)
+    times = np.array(times).astype(np.int32)
+
+    # FIXME: set output data file
     np.savez('../data/toy/data.npz', obsvs=obsvs, preds=preds, times=times, batches=batches)
+
+    # exit(1)  # TODO: uncomment this line to show debug outputs
 
     # display
     for bb in batches:
