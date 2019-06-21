@@ -2,7 +2,7 @@ import numpy as np
 import matplotlib.pyplot as plt
 
 
-def create_samples(n_samples, n_per_batch=2):
+def create_samples(n_samples, n_conditions, n_modes, n_per_batch=2):
     samples = []
     time_stamps = []
     for ii in range(n_samples):
@@ -49,11 +49,9 @@ def write_to_file(real_samples, timesteps, filename):
 
 
 if __name__ == '__main__':
-    n_modes = 3
-    n_conditions = 6
-    n_samples =  768
+    n_samples = 768
     # samples, time_stamps = create_samples(n_samples, n_per_batch=2)  # train
-    samples, time_stamps = create_samples(n_samples, n_per_batch=6)  # test
+    samples, time_stamps = create_samples(n_samples, n_conditions=8, n_modes=3, n_per_batch=6)  # test
     # FIXME: set output text file
     write_to_file(samples, time_stamps, '../data/toy/toy.txt')
 
