@@ -16,9 +16,10 @@ from utils.linear_models import predict_cv
 
 # ========== set input/output files ============
 dataset_name = 'toy'  # FIXME: Notice to select the proper dataset
-model_name = 'InfoGAN'
-processed_data_file = '../data/' + dataset_name +'/data.npz'
-model_file = '../trained_models/medium_' + model_name + '_' + dataset_name + '.pt'
+model_name = 'socialWays'
+# processed_data_file = '../data/' + dataset_name +'/data.npz'
+processed_data_file = '../data/eth/data_8_12.npz'
+model_file = '../trained_models/' + model_name + '-' + dataset_name + '.pt'
 
 # FIXME: ====== training hyper-parameters ======
 # Unrolled GAN
@@ -38,7 +39,7 @@ lr_d = 1E-4
 batch_size = 128
 hidden_size = 64
 n_epochs = 100000
-num_social_features = 1
+num_social_features = 3
 social_feature_size = hidden_size // 2
 noise_len = hidden_size // 2
 n_lstm_layers = 1
@@ -101,32 +102,27 @@ def calc_error(pred_hat, pred):
     return ADEs.data.cpu().numpy(), FDEs.data().cpu().numpy()
 
 
-class AttentionRel(nn.Module):
+class AttentionPooling(nn.Module):
     def __init__(self):
-        super(AttentionRel, self).__init__()
+        super(AttentionPooling, self).__init__()
 
-    def forward(self, x, sub_batches=[]):
-        bs = x.shape[0]
-
-        oriens = torch.FloatTensor(torch.zeros(bs, 2))
-        for ii in range(bs):
-            oriens[ii] = x[ii, -1] - x[ii, -3]
-        oriens = torch.atan2(oriens[:, 1], oriens[:, 0])
+    def forward(self, f, h, sub_batches=[]):
+        bs = h.shape[0]
 
         attens = torch.zeros(bs, bs).cuda()
-        for sb in sub_batches:
-            x_sb = x[sb[0]:sb[1]]
-            for ped in range(sb[0], sb[1]):
-                others = [xx for j, xx in enumerate(x_sb) if j != (ped - sb[0])]
-                POI_x = x_sb[ped-sb[0]]
-                if not others: continue
-                others = torch.stack(others)
-                dx = POI_x.unsqueeze(0) - others
-
-            # attn = torch.mm(1, 1)
-            # attn = attn - attn.max(1)[0]
-            # exp_attn = torch.exp(attn).view(sb_len, sb_len)
-            # attens[sb[0]:sb[1], sb[0]:sb[1]] = exp_attn / (exp_attn.sum(1).unsqueeze(1) + 10E-8)
+        # for sb in sub_batches:
+        #     x_sb = x[sb[0]:sb[1]]
+        #     for ped in range(sb[0], sb[1]):
+        #         others = [xx for j, xx in enumerate(x_sb) if j != (ped - sb[0])]
+        #         POI_x = x_sb[ped-sb[0]]
+        #         if not others: continue
+        #         others = torch.stack(others)
+        #         dx = POI_x.unsqueeze(0) - others
+        #
+        #     attn = torch.mm(1, 1)
+        #     attn = attn - attn.max(1)[0]
+        #     exp_attn = torch.exp(attn).view(sb_len, sb_len)
+        #     attens[sb[0]:sb[1], sb[0]:sb[1]] = exp_attn / (exp_attn.sum(1).unsqueeze(1) + 10E-8)
 
         return attens
 
@@ -140,23 +136,34 @@ class EmbedSocialFeatures(nn.Module):
         self.fc2 = nn.Sequential(nn.Linear(32, 64), nn.ReLU())
         self.fc3 = nn.Linear(64, hidden_size)
 
-    def forward(self, f_list, last_hidden, sub_batches):
-        embedded_features = torch.FloatTensor(torch.zeros(len(f_list), self.hidden_size)).cuda()
+    def forward(self, ftr_list, sub_batches):
+        embedded_features = []
+        for ftrs in ftr_list:
+            # if not ftrs:
+            #     embedded_features.append([])
+            #     continue
+            emb_i = []
+            for kk in range(len(ftrs)):
+                h = self.fc1(ftrs[kk].unsqueeze(0))
+                h = self.fc2(h)
+                h = self.fc3(h)
+                emb_i.append(h)
+            embedded_features.append(emb_i)
 
-        accum_index_list = []
-        last = 0
-        for ff in f_list:
-            accum_index_list.append([last, last + ff.shape[0]])
-            last += ff.shape[0]
-        if last > 0:
-            f_tensor = torch.cat(f_list)
-            y = self.fc1(f_tensor.unsqueeze(1))
-            y = self.fc2(y)
-            y = self.fc3(y)
-            for ii, inds_i in enumerate(accum_index_list):
-                if inds_i[1] - inds_i[0] > 0:
-                    yi = y[inds_i[0]:inds_i[1]]
-                    embedded_features[ii, :] = yi.sum(dim=0) / float(inds_i[1] - inds_i[0])
+        # accum_index_list = []
+        # last = 0
+        # for ff in f_list:
+        #     accum_index_list.append([last, last + ff.shape[0]])
+        #     last += ff.shape[0]
+        # if last > 0:
+        #     f_tensor = torch.cat(f_list)
+        #     y = self.fc1(f_tensor.unsqueeze(1))
+        #     y = self.fc2(y)
+        #     y = self.fc3(y)
+        #     for ii, inds_i in enumerate(accum_index_list):
+        #         if inds_i[1] - inds_i[0] > 0:
+        #             yi = y[inds_i[0]:inds_i[1]]
+        #             embedded_features[ii, :] = yi.sum(dim=0) / float(inds_i[1] - inds_i[0])
 
         # for sb in sub_batches:
         #     n_neighbors = int(sb[1] - sb[0] - 1)
@@ -172,49 +179,44 @@ class EmbedSocialFeatures(nn.Module):
         return embedded_features
 
 
-def CrowdFeatures(x, sub_batches):
+def DCA(xA_4d, xB_4d):
+    dp = xA_4d[:2] - xB_4d[:2]
+    dv = xA_4d[2:] - xB_4d[2:]
+    ttca = torch.dot(-dp, dv) / (torch.norm(dv) ** 2 + 1E-6)
+    # ttca = torch.max(ttca, 0)
+    dca = torch.norm(dp + ttca * dv)
+    return dca
+
+
+def Bearing(xA_4d, xB_4d):
+    dp = xA_4d[:2] - xB_4d[:2]
+    v = xA_4d[2:]
+    cos_theta = torch.dot(dp, v) / (torch.norm(dp) * torch.norm(v) + 1E-6)
+    return cos_theta
+
+
+def SocialFeatures(x, sub_batches):
     if len(sub_batches) == 0:
         sub_batches = [[0, x.shape[0]]]
-    social_features = x.shape[0]*[None]
-    cntr = -1
+    social_features = [] # x.shape[0]*[None]
     for sb in sub_batches:
+        if sb[1] - sb[0] == 1:
+            social_features.append([])
+            continue
         for ii in range(sb[0], sb[1]):
-            cntr += 1
-            if sb[1] - sb[0] > 1:
-                xi = x[ii, -1]
-                others = torch.stack([xx[-1] for jj, xx in enumerate(x[sb[0]:sb[1]]) if jj != ii-sb[0]])
-                l2 = torch.pow(xi.unsqueeze(0) - others, 2).sum(1).sqrt()
-                social_features[cntr] = l2
-            else:
-                social_features[cntr] = torch.FloatTensor(torch.empty((0))).cuda()
+            xi = x[ii, -1]
+            features_i = []
+            for jj in range(sb[0], sb[1]):
+                if ii == jj: continue
+                xj = x[jj, -1]
+                distance = (xi - xj).norm()
+                bearing = Bearing(xi, xj)
+                dca = DCA(xi, xj)
+                feature_list = [distance, bearing, dca]
+                features_i.append(torch.stack(feature_list))
+            social_features.append(features_i)
+
     return social_features
-
-
-class AttentionCIDNN(nn.Module):
-    def __init__(self):
-        super(AttentionCIDNN, self).__init__()
-        self.fc1 = nn.Sequential(nn.Linear( 2, 32), nn.ReLU())
-        self.fc2 = nn.Sequential(nn.Linear(32, 64), nn.ReLU())
-        self.fc3 = nn.Linear(64, 64)
-
-    def forward(self, x, sub_batches=[]):
-        bs = x.shape[0]
-        x = x[:, -1]  # Just use the last locations
-
-        h = self.fc1(x)
-        h = self.fc2(h)
-        h = self.fc3(h)
-
-        attens = torch.zeros(bs, bs).cuda()
-        for sb in sub_batches:
-            sb_len = int(sb[1] - sb[0])
-            h_sb = h[sb[0]:sb[1]]
-            attn = torch.mm(h_sb, h_sb.transpose(0, 1))
-            attn = attn - attn.max(1)[0]
-            exp_attn = torch.exp(attn).view(sb_len, sb_len)
-            attens[sb[0]:sb[1], sb[0]:sb[1]] = exp_attn / (exp_attn.sum(1).unsqueeze(1) + 10E-8)
-
-        return attens
 
 
 class EncoderLstm(nn.Module):
@@ -223,7 +225,6 @@ class EncoderLstm(nn.Module):
         super(EncoderLstm, self).__init__()
         self.embed = nn.Linear(4, self.hidden_size)
         self.lstm = nn.LSTM(self.hidden_size, self.hidden_size, num_layers=n_layers, batch_first=True)
-        # self.gru = nn.GRU
         self.lstm_h = []
         # init_weights(self)
 
@@ -232,9 +233,6 @@ class EncoderLstm(nn.Module):
 
     def forward(self, obsv):
         bs = obsv.shape[0]
-        # obsv_vel = obsv[:, 1:] - obsv[:, :-1]
-        # obsv_vel = torch.cat([obsv_vel[:, 0].unsqueeze(1), obsv_vel], dim=1)
-        # obsv = torch.cat([obsv, obsv_vel], dim=2)
         obsv = self.embed(obsv)
         y, self.lstm_h = self.lstm(obsv.view(bs, -1, self.hidden_size), self.lstm_h)
         return y
@@ -291,22 +289,6 @@ class DecoderFC(nn.Module):
         return out
 
 
-class DecoderFCFull(nn.Module):
-    def __init__(self, hidden_size, n_next):
-        super(DecoderFCFull, self).__init__()
-        self.hidden_size = hidden_size
-        self.fc1 = torch.nn.Sequential(torch.nn.Linear(hidden_size, hidden_size), nn.LeakyReLU(0.2),
-                                       torch.nn.Linear(hidden_size, hidden_size), nn.LeakyReLU(0.2),
-                                       torch.nn.Linear(hidden_size,  n_next * 2))
-
-    def forward(self, coded_tracks, social_codes, noise, sub_batches=[]):
-        bs = coded_tracks.size(0)
-        inp = torch.cat([coded_tracks, social_codes, noise], dim=1)
-        # print(inp[0])
-        out = self.fc1(inp)
-        return out
-
-
 class DecoderLstm(nn.Module):
     def __init__(self, input_size, hidden_size):
         super(DecoderLstm, self).__init__()
@@ -322,7 +304,7 @@ class DecoderLstm(nn.Module):
     def init_lstm(self, h, c):
         self.lstm_h = (h, c)
 
-    def forward(self, social_codes, noise):
+    def forward(self, coded_tracks, social_codes, noise, sub_batches=[]):
         bs = noise.shape[0]
         # inp = torch.cat([social_codes, noise], dim=1)
         # inp = torch.FloatTensor(torch.zeros(bs, 1, hidden_size)).cuda()
@@ -333,11 +315,10 @@ class DecoderLstm(nn.Module):
 
 
 encoder = EncoderLstm(hidden_size, n_lstm_layers).cuda()
-attention = AttentionRel().cuda()
+attention = AttentionPooling().cuda()
 feature_embedder = EmbedSocialFeatures(num_social_features, social_feature_size).cuda()
 
 decoder = DecoderFC(hidden_size + social_feature_size + noise_len).cuda()
-# decoder = DecoderFCFull(traj_code_len + social_feature_size + noise_len, n_next).cuda()
 # decoder = DecoderLstm(social_feature_size + VEL_VEC_LEN + noise_len, traj_code_len).cuda()
 
 predictor_params = chain(attention.parameters(), encoder.parameters(), decoder.parameters())
@@ -350,6 +331,7 @@ bce_loss = nn.BCELoss()
 
 print('hidden dim = %d | lr(G) =  %.5f | lr(D) =  %.5f' % (hidden_size, lr_g, lr_d))
 
+
 def predict(obsv_p, noise, n_next, sub_batches=[]):
     bs = obsv_p.shape[0]
     obsv_4d = get_traj_4d(obsv_p, [])
@@ -360,16 +342,11 @@ def predict(obsv_p, noise, n_next, sub_batches=[]):
     encoder.init_lstm(lstm_h_c[0], lstm_h_c[1])
     encoder(obsv_4d)
 
-    # take the hidden state of encoder and put it in decoder
-    # decoder.init_lstm(encoder.lstm_h[0], encoder.lstm_h[1])
-    # for si in range(1):
-        # attn = attention(xs, sub_batches)
-        # features = CrowdFeatures(obsv, sub_batches)
-        # emb_features = feature_embedder(features, encoder.lstm_h, sub_batches)
+    features = SocialFeatures(obsv_4d, sub_batches)
+    emb_features = feature_embedder(features, sub_batches)
+    attn = attention(emb_features, encoder.lstm_h[0])
 
     emb_sfeatures = torch.FloatTensor(torch.zeros(bs, feature_embedder.hidden_size)).cuda()
-    # v_hat = decoder(encoder.lstm_h[0].view(bs, -1), emb_sfeatures, noise)
-    # pred_4d = torch.FloatTensor(torch.zeros(bs, n_next, 4)).cuda()
 
     pred_4ds = []
     last_obsv = obsv_4d[:, -1]
