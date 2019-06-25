@@ -125,7 +125,7 @@ if __name__ == '__main__':
     parser.add_argument('--npz', type=str)
     parser.add_argument('--n_conditions', default=8, type=int)
     parser.add_argument('--n_modes', default=3, type=int)
-    parser.add_argument('--n_samples', default=3*8*128, type=int)
+    parser.add_argument('--n_samples', default=3*8*32, type=int)
     parser.add_argument('--anim', action="store_true")
     args = parser.parse_args()
 

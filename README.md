@@ -59,7 +59,7 @@ $ python3 create_toy.py --txt [output file]
 ```
 For having fun and seeing the animation of toy agents you can call:
 ```
-python3 create_toy.py --anim
+$ python3 create_toy.py --anim
 ```
 
 

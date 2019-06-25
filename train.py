@@ -40,7 +40,7 @@ batch_size = 128
 hidden_size = 64
 n_epochs = 100000
 num_social_features = 3
-social_feature_size = hidden_size // 2
+social_feature_size = hidden_size
 noise_len = hidden_size // 2
 n_lstm_layers = 1
 # ==============================================
@@ -103,31 +103,30 @@ def calc_error(pred_hat, pred):
 
 
 class AttentionPooling(nn.Module):
-    def __init__(self):
+    def __init__(self, h_dim, f_dim):
         super(AttentionPooling, self).__init__()
+        self.f_dim = f_dim
+        self.h_dim = h_dim
+        self.W = nn.Linear(h_dim, f_dim, bias=True)
 
-    def forward(self, f, h, sub_batches=[]):
-        bs = h.shape[0]
+    def forward(self, f, h, sub_batches):
+        Wh = self.W(h)
+        S = torch.zeros_like(h)
+        for sb in sub_batches:
+            N = sb[1] - sb[0]
+            if N == 1: continue
+            for ii in range(sb[0], sb[1]):
+                sigma_i = torch.ones((N), dtype=h.dtype, device=h.device) * (-1000)
+                k_counter = -1
+                for kk in range(sb[0], sb[1]):
+                    if ii == kk: continue
+                    k_counter += 1
+                    fik = f[ii][k_counter]
+                    sigma_i[kk-sb[0]] = torch.dot(fik.squeeze(), Wh[kk].squeeze()) * (N-1)/np.sqrt(self.f_dim)
+                attentions = torch.softmax(sigma_i, dim=0)
+                S[ii] = torch.mm(attentions.view(1, N), h[sb[0]:sb[1]])
 
-        # attens = torch.zeros(bs, bs).cuda()
-        # sigma = torch.dot(f, w * h) * (N-1) / ...
-
-
-        # for sb in sub_batches:
-        #     x_sb = x[sb[0]:sb[1]]
-        #     for ped in range(sb[0], sb[1]):
-        #         others = [xx for j, xx in enumerate(x_sb) if j != (ped - sb[0])]
-        #         POI_x = x_sb[ped-sb[0]]
-        #         if not others: continue
-        #         others = torch.stack(others)
-        #         dx = POI_x.unsqueeze(0) - others
-        #
-        #     attn = torch.mm(1, 1)
-        #     attn = attn - attn.max(1)[0]
-        #     exp_attn = torch.exp(attn).view(sb_len, sb_len)
-        #     attens[sb[0]:sb[1], sb[0]:sb[1]] = exp_attn / (exp_attn.sum(1).unsqueeze(1) + 10E-8)
-
-        return attens
+        return S
 
 
 class EmbedSocialFeatures(nn.Module):
@@ -257,8 +256,8 @@ class DecoderFC(nn.Module):
                                        torch.nn.Linear(hidden_dim//2, hidden_dim//4),
                                        torch.nn.Linear(hidden_dim//4, 2))
 
-    def forward(self, coded_tracks, social_codes, noise, sub_batches=[]):
-        inp = torch.cat([coded_tracks, social_codes, noise], dim=1)
+    def forward(self, h, s, z):
+        inp = torch.cat([h, s, z], dim=1)
         out = self.fc1(inp)
         return out
 
@@ -289,8 +288,8 @@ class DecoderLstm(nn.Module):
 
 
 encoder = EncoderLstm(hidden_size, n_lstm_layers).cuda()
-attention = AttentionPooling().cuda()
 feature_embedder = EmbedSocialFeatures(num_social_features, social_feature_size).cuda()
+attention = AttentionPooling(hidden_size, social_feature_size).cuda()
 
 decoder = DecoderFC(hidden_size + social_feature_size + noise_len).cuda()
 # decoder = DecoderLstm(social_feature_size + VEL_VEC_LEN + noise_len, traj_code_len).cuda()
@@ -318,14 +317,12 @@ def predict(obsv_p, noise, n_next, sub_batches=[]):
 
     features = SocialFeatures(obsv_4d, sub_batches)
     emb_features = feature_embedder(features, sub_batches)
-    attn = attention(emb_features, encoder.lstm_h[0])
-
-    emb_sfeatures = torch.FloatTensor(torch.zeros(bs, feature_embedder.hidden_size)).cuda()
+    weighted_features = attention(emb_features, encoder.lstm_h[0].squeeze(), sub_batches)
 
     pred_4ds = []
     last_obsv = obsv_4d[:, -1]
     for ii in range(n_next):
-        new_v = decoder(encoder.lstm_h[0].view(bs, -1), emb_sfeatures, noise).view(bs, 2) # + last_obsv[:, 2:]
+        new_v = decoder(encoder.lstm_h[0].view(bs, -1), weighted_features, noise).view(bs, 2) # + last_obsv[:, 2:]
         new_p = new_v + last_obsv[:, :2]
         last_obsv = torch.cat([new_p, new_v], dim=1)
         pred_4ds.append(last_obsv)
