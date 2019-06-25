@@ -17,8 +17,7 @@ from utils.linear_models import predict_cv
 # ========== set input/output files ============
 dataset_name = 'toy'  # FIXME: Notice to select the proper dataset
 model_name = 'socialWays'
-# processed_data_file = '../data/' + dataset_name +'/data.npz'
-processed_data_file = '../data/eth/data_8_12.npz'
+input_file = '../toy.npz'
 model_file = '../trained_models/' + model_name + '-' + dataset_name + '.pt'
 
 # FIXME: ====== training hyper-parameters ======
@@ -33,7 +32,7 @@ use_l2_loss = False
 use_variety_loss = False
 loss_l2_w = 0.5  # WARNING for both l2 and variety
 # Learning Rate
-lr_g = 1E-4
+lr_g = 1E-3
 lr_d = 1E-4
 # FIXME: ====== Network Size ===================
 batch_size = 128
@@ -43,12 +42,13 @@ num_social_features = 3
 social_feature_size = hidden_size
 noise_len = hidden_size // 2
 n_lstm_layers = 1
+use_social = False
 # ==============================================
 
 # FIXME: ======= Loda Data =====================
 print(os.path.dirname(os.path.realpath(__file__)))
 
-data = np.load(processed_data_file)
+data = np.load(input_file)
 dataset_obsv, dataset_pred, dataset_t, the_batches = \
     data['obsvs'], data['preds'], data['times'], data['batches']
 train_size = max(1, (len(the_batches) * 4) // 5)
@@ -61,7 +61,7 @@ n_test_samples = dataset_obsv.shape[0] - n_train_samples
 if n_test_samples == 0:
     n_test_samples = 1
     the_batches = np.array([the_batches[0], the_batches[0]])
-print(processed_data_file, ' # Training samples: ', n_train_samples)
+print(input_file, ' # Training samples: ', n_train_samples)
 
 # normalize
 scale = Scale()
@@ -130,7 +130,7 @@ class AttentionPooling(nn.Module):
 
 
 class EmbedSocialFeatures(nn.Module):
-    def __init__(self, input_size, hidden_size=32):
+    def __init__(self, input_size, hidden_size):
         super(EmbedSocialFeatures, self).__init__()
         self.input_size = input_size
         self.hidden_size = hidden_size
@@ -227,7 +227,7 @@ class Discriminator(nn.Module):
         self.latent_decoder = nn.Sequential(nn.Linear(hidden_dim, hidden_dim//2), nn.LeakyReLU(0.2),
                                         nn.Linear(self.lstm_dim//2, n_latent_code))
 
-    def forward(self, obsv, pred, sub_batches=[]):
+    def forward(self, obsv, pred):
         bs = obsv.size(0)
         lstm_h_c = (torch.zeros(1, bs, self.lstm_dim).cuda(),
                     torch.zeros(1, bs, self.lstm_dim).cuda())
@@ -277,11 +277,9 @@ class DecoderLstm(nn.Module):
     def init_lstm(self, h, c):
         self.lstm_h = (h, c)
 
-    def forward(self, coded_tracks, social_codes, noise, sub_batches=[]):
-        bs = noise.shape[0]
-        # inp = torch.cat([social_codes, noise], dim=1)
-        # inp = torch.FloatTensor(torch.zeros(bs, 1, hidden_size)).cuda()
-        inp = torch.cat([social_codes, noise], dim=1)
+    def forward(self, h, s, z):
+        bs = z.shape[0]
+        inp = torch.cat([h, s, z], dim=1)
         out, self.lstm_h = self.lstm(inp.unsqueeze(1), self.lstm_h)
         out = self.fc(out.squeeze())
         return out
@@ -295,10 +293,10 @@ decoder = DecoderFC(hidden_size + social_feature_size + noise_len).cuda()
 # decoder = DecoderLstm(social_feature_size + VEL_VEC_LEN + noise_len, traj_code_len).cuda()
 
 predictor_params = chain(attention.parameters(), encoder.parameters(), decoder.parameters())
-predictor_optimizer = opt.Adam(predictor_params, lr=lr_g, betas=(0.8, 0.999))
+predictor_optimizer = opt.Adam(predictor_params, lr=lr_g, betas=(0.9, 0.999))
 
 D = Discriminator(n_next, hidden_size, n_latent_codes).cuda()
-D_optimizer = opt.Adam(D.parameters(), lr=lr_d, betas=(0.8, 0.999))
+D_optimizer = opt.Adam(D.parameters(), lr=lr_d, betas=(0.9, 0.999))
 mse_loss = nn.MSELoss()
 bce_loss = nn.BCELoss()
 
@@ -315,9 +313,12 @@ def predict(obsv_p, noise, n_next, sub_batches=[]):
     encoder.init_lstm(lstm_h_c[0], lstm_h_c[1])
     encoder(obsv_4d)
 
-    features = SocialFeatures(obsv_4d, sub_batches)
-    emb_features = feature_embedder(features, sub_batches)
-    weighted_features = attention(emb_features, encoder.lstm_h[0].squeeze(), sub_batches)
+    if use_social:
+        features = SocialFeatures(obsv_4d, sub_batches)
+        emb_features = feature_embedder(features, sub_batches)
+        weighted_features = attention(emb_features, encoder.lstm_h[0].squeeze(), sub_batches)
+    else:
+        weighted_features = torch.zeros_like(encoder.lstm_h[0].squeeze())
 
     pred_4ds = []
     last_obsv = obsv_4d[:, -1]
