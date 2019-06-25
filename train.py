@@ -109,7 +109,10 @@ class AttentionPooling(nn.Module):
     def forward(self, f, h, sub_batches=[]):
         bs = h.shape[0]
 
-        attens = torch.zeros(bs, bs).cuda()
+        # attens = torch.zeros(bs, bs).cuda()
+        # sigma = torch.dot(f, w * h) * (N-1) / ...
+
+
         # for sb in sub_batches:
         #     x_sb = x[sb[0]:sb[1]]
         #     for ped in range(sb[0], sb[1]):
@@ -139,9 +142,6 @@ class EmbedSocialFeatures(nn.Module):
     def forward(self, ftr_list, sub_batches):
         embedded_features = []
         for ftrs in ftr_list:
-            # if not ftrs:
-            #     embedded_features.append([])
-            #     continue
             emb_i = []
             for kk in range(len(ftrs)):
                 h = self.fc1(ftrs[kk].unsqueeze(0))
@@ -149,32 +149,6 @@ class EmbedSocialFeatures(nn.Module):
                 h = self.fc3(h)
                 emb_i.append(h)
             embedded_features.append(emb_i)
-
-        # accum_index_list = []
-        # last = 0
-        # for ff in f_list:
-        #     accum_index_list.append([last, last + ff.shape[0]])
-        #     last += ff.shape[0]
-        # if last > 0:
-        #     f_tensor = torch.cat(f_list)
-        #     y = self.fc1(f_tensor.unsqueeze(1))
-        #     y = self.fc2(y)
-        #     y = self.fc3(y)
-        #     for ii, inds_i in enumerate(accum_index_list):
-        #         if inds_i[1] - inds_i[0] > 0:
-        #             yi = y[inds_i[0]:inds_i[1]]
-        #             embedded_features[ii, :] = yi.sum(dim=0) / float(inds_i[1] - inds_i[0])
-
-        # for sb in sub_batches:
-        #     n_neighbors = int(sb[1] - sb[0] - 1)
-        #     if n_neighbors > 0:
-        #         fi = torch.cat(f_list[sb[0]:sb[1]])
-        #         fi = fi.view((n_neighbors+1, n_neighbors, self.input_size))
-        #         xi = self.fc1(fi)
-        #         xi = self.fc2(xi)
-        #         xi = self.fc3(xi).view(n_neighbors+1, n_neighbors, self.hidden_size)
-        #         y = xi.sum(dim=1) / float(n_neighbors)
-        #         embedded_features[sb[0]:sb[1], :] = y
 
         return embedded_features
 
