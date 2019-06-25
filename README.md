@@ -21,6 +21,40 @@ This work is, theoretically, an improvement of [Social-GAN](https://arxiv.org/ab
 3. Replacing L2 loss function with Information loss, an idea inspired by [info-GAN](https://arxiv.org/abs/1606.03657)
 
 
+## System Architecture
+The system is composed of two main components: Trajectory Generator and Trajectory Discriminator.
+For generating a prediction sample for Pedestrian of Interest (POI), the generator needs the following inputs:
+- the observed trajectory of POI,
+- the observed trajectory of sorrounding agents,
+- the noise signal (z), 
+- and the latent codes (c)
+
+The Discriminator takes a pair of observation and prediction samples and decides, if the given prediction sample is real or fake.
+<p align='center'>
+  <img src='figs/block-diagram.png' width='800px'\>
+</p>
+
+## Toy Example
+We designed the trajectory toy dataset, to assess the capability of generator in preserving modes of trajectory distribution. 
+There are six groups of trajectories, all starting from one specific point located along a circle (blue dots). When approaching the circle center, they split into 3 subgroups. Their endpoints are the green dots.
+<p align='center'>
+  <img src='figs/toy-example.png' width='600px'\>
+</p>
+
+In order to create the toy example trajectories, you need to run 
+
+```
+python3 create_toy.py
+```
+
+## How to Train
+
+
+## How to Setup
+
+
+
+## How to Cite
 If you are using this code for your work, please cite:
 ```
 @inproceedings{amirian2019social,
@@ -31,17 +65,3 @@ If you are using this code for your work, please cite:
   year={2019}
 }
 ```
-## System Architecture
-The system is composed of two main components: Trajectory Generator and Trajectory Discriminator.
-For generating a prediction sample for Pedestrian of Interest (POI), the generator needs the following inputs:
-- the observed trajectory of POI,
-- the observed trajectory of sorrounding agents,
-- the noise signal (z), 
-- and the latent codes (c)
-
-The Discriminator takes a pair of observation and prediction samples and decides, if the given prediction sample is real or fake.
-
-<div align='center'>
-  <img src='figs/block-diagram.png' width='1000px'>
-</div>
-
