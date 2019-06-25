@@ -38,14 +38,30 @@ The Discriminator takes a pair of observation and prediction samples and decides
 We designed the trajectory toy dataset, to assess the capability of generator in preserving modes of trajectory distribution. 
 There are six groups of trajectories, all starting from one specific point located along a circle (blue dots). When approaching the circle center, they split into 3 subgroups. Their endpoints are the green dots.
 <p align='center'>
-  <img src='figs/toy-example.png' width='600px'\>
+  <img src='figs/toy.gif' width='600px'\>
 </p>
 
 In order to create the toy example trajectories, you need to run 
 
 ```
-python3 create_toy.py
+$ python3 create_toy.py --npz [output file]
 ```
+this will store the required data into a .npz file. The default parameters are:
+```
+n_conditions = 8
+n_modes = 3
+n_samples = 768  
+```
+
+You can also store the raw trajectories into a txt file with the following command:
+```
+$ python3 create_toy.py --txt [output file]
+```
+For having fun and seeing the animation of toy agents you can call:
+```
+python3 create_toy.py --anim
+```
+
 
 ## How to Train
 
