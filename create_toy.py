@@ -7,37 +7,50 @@ import argparse
 # equivalent to rcParams['animation.html'] = 'html5'
 rc('animation', html='html5')
 
-
+# Function that creates path samples
 def create_samples(n_samples, n_conditions, n_modes, n_per_batch=2):
     samples = []
     time_stamps = []
     for ii in range(n_samples):
+        # Determine the condition (i.e. the initial part of the path)
+        # selected_way is a an integer between and n_conditions
         selected_way = (ii * n_conditions) // n_samples
-        data_angle = selected_way * (360 / n_conditions)
         w_i = selected_way % (n_conditions/n_per_batch)
+        # Initial time stamp for this sample
         t0 = ii % (n_samples // n_conditions) + w_i * (n_samples // n_conditions)
-        data_angle = data_angle * np.pi / 180
+        # Approach angle
+        data_angle = selected_way * (2.0*np.pi / n_conditions)
 
+        # The first two points are located on the same radial line centered
+        # on the origin.
         x0 = np.cos(data_angle) * 8
         y0 = np.sin(data_angle) * 8
         x1 = np.cos(data_angle) * 6
         y1 = np.sin(data_angle) * 6
 
-        fixed_turn = ((ii % n_modes) - 1) * 20 * np.pi / 180
-        p2_turn_rand = np.random.randn(1) * 1.5 * np.pi / 180
-        p3_turn_rand = np.random.randn(1) * 2.5 * np.pi / 180
+        # Level of rotation is given by the mode index ((ii % n_modes)).
+        # The modes are centered around 0
+        fixed_turn = ((ii % n_modes) - n_modes//2) * 20 * np.pi / 180
 
+        # Third point: located on a circle of radius 4
+        # Normal-distributed angle deviation are introduced as p2_turn_rand
+        p2_turn_rand = np.random.randn(1) * 1.5 * np.pi / 180
         x2 = np.cos(data_angle + fixed_turn + p2_turn_rand) * 4
         y2 = np.sin(data_angle + fixed_turn + p2_turn_rand) * 4
 
+        # Fourth point: located on a circle of radius 2
+        # Normal-distributed angle deviation are introduced as p3_turn_rand
+        p3_turn_rand = np.random.randn(1) * 2.5 * np.pi / 180
         x3 = np.cos(data_angle + fixed_turn + p2_turn_rand + p3_turn_rand) * 2
         y3 = np.sin(data_angle + fixed_turn + p2_turn_rand + p3_turn_rand) * 2
 
+        # Add the path
         samples.append(np.array([[x0, y0], [x1, y1], [x2, y2], [x3, y3]]))
+        # Add the time stamps. t0 is the starting position time stamp
         time_stamps.append(np.array([t0*4, t0*4+1, t0*4+2, t0*4+3]))
 
+    # Scale down the paths
     samples = np.array(samples) / 8
-
     return samples, time_stamps
 
 
@@ -53,8 +66,9 @@ def write_to_file(real_samples, timesteps, filename):
         gt_file.close()
         print('writing to ' + filename)
 
-
+# A class for the animation of the generated samples
 class ToyAnimation:
+    # Constructor
     def __init__(self, samples):
 
         # First set up the figure, the axis, and the plot element we want to animate
@@ -62,9 +76,13 @@ class ToyAnimation:
         plt.subplots_adjust(left=0.23, right=0.77, bottom=0.03, top=0.99)
         ax = plt.axes(xlim=(-1.2, 1.2), ylim=(-1.2, 1.2))
 
+        # Plot the samples
         for ii in range(samples.shape[0]):
+            # Starting points in blue
             plt.plot(samples[ii, 0, 0], samples[ii, 0, 1], 'bo', alpha=0.2, zorder=1)
+            # Initial part (fist two positions) in blue
             plt.plot(samples[ii, 0:2, 0], samples[ii, 0:2, 1], 'b', linewidth=2, alpha=0.2, zorder=0)
+            # Second part in red
             plt.plot(samples[ii, 1:, 0], samples[ii, 1:, 1], 'r', linewidth=2, alpha=0.2, zorder=0)
 
         self.dt = 0.04
@@ -79,27 +97,32 @@ class ToyAnimation:
         self.anim = animation.FuncAnimation(self.fig, self.animate, init_func=self.init,
                                             frames=self.FPS * self.DURATION, interval=5, blit=False)
 
+    # Main function of the animation: Draw the agent
     def step_animation(self, dt):
+        # The animation of a single sample takes a time 1
         if self.cur_progress > 1:
+            # Select a sample randomly
             self.cur_id = int(np.random.randint(0, self.samples.shape[0]))
             self.cur_progress = 0
-
+        # Selected path
         points = self.samples[self.cur_id]
         n_sub_goals = points.shape[0] - 1
+        # Determines the current path segment
         x = self.cur_progress * n_sub_goals
         start_ind = int(min(np.floor(x), n_sub_goals-1))
         pointA = points[start_ind]
         pointB = points[start_ind+1]
+        # Interpolates it linearly
         self.cur_loc = pointB * (x - start_ind) + pointA * (start_ind + 1 - x)
         self.cur_progress += dt
 
     def init(self):
-        # initialization function: plot the background of each frame
+        # Initialization function: plot the background of each frame
         self.scat.set_offsets(np.zeros((self.samples.shape[0], 2), dtype=np.float32))
         return self.scat,
 
 
-    # animation function.  This is called sequentially
+    # Animation function.  This is called sequentially
     def animate(self, i):
         self.init()
         self.step_animation(self.dt)
@@ -129,6 +152,7 @@ if __name__ == '__main__':
     parser.add_argument('--anim', action="store_true")
     args = parser.parse_args()
 
+    # Create path samples based on the specified parameters
     samples, time_stamps = create_samples(args.n_samples, args.n_conditions, args.n_modes, n_per_batch=6)
 
     if args.txt is not None: # FIXME: set output text file
@@ -146,6 +170,8 @@ if __name__ == '__main__':
     batches = []
     for key, values in t_dict.items():
         batches.append([len(obsvs), len(obsvs) + len(values)])
+        # Separates the observed data (first two positions)
+        # from the part to predict (last two positions)
         for value in values:
             obsvs.append(samples[value][:2])
             preds.append(samples[value][2:])

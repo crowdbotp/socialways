@@ -17,7 +17,7 @@ This work is, theoretically, an improvement of [Social-GAN](https://arxiv.org/ab
 2. Introducing to use new social features between pair of agents:
 - Bearing angle
 - Euclidean Distance
-- Distance to Colsest Approach (DCA)
+- Distance to Closest Approach (DCA)
 3. Replacing L2 loss function with Information loss, an idea inspired by [info-GAN](https://arxiv.org/abs/1606.03657)
 
 
@@ -25,8 +25,8 @@ This work is, theoretically, an improvement of [Social-GAN](https://arxiv.org/ab
 The system is composed of two main components: Trajectory Generator and Trajectory Discriminator.
 For generating a prediction sample for Pedestrian of Interest (POI), the generator needs the following inputs:
 - the observed trajectory of POI,
-- the observed trajectory of sorrounding agents,
-- the noise signal (z), 
+- the observed trajectory of surrounding agents,
+- the noise signal (z),
 - and the latent codes (c)
 
 The Discriminator takes a pair of observation and prediction samples and decides, if the given prediction sample is real or fake.
@@ -35,13 +35,13 @@ The Discriminator takes a pair of observation and prediction samples and decides
 </p>
 
 ## Toy Example
-We designed the trajectory toy dataset, to assess the capability of generator in preserving modes of trajectory distribution. 
+We designed the trajectory toy dataset, to assess the capability of generator in preserving modes of trajectory distribution.
 There are six groups of trajectories, all starting from one specific point located along a circle (blue dots). When approaching the circle center, they split into 3 subgroups. Their endpoints are the green dots.
 <p align='center'>
   <img src='figs/toy.gif' width='600px'\>
 </p>
 
-In order to create the toy example trajectories, you need to run 
+In order to create the toy example trajectories, you need to run
 
 ```
 $ python3 create_toy.py --npz [output file]
