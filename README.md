@@ -53,7 +53,7 @@ n_modes = 3
 n_samples = 768  
 ```
 
-You can also store the raw trajectories into a txt file with the following command:
+You can also store the raw trajectories into a .txt file with the following command:
 ```
 $ python3 create_toy.py --txt [output file]
 ```
@@ -64,7 +64,11 @@ $ python3 create_toy.py --anim
 
 
 ## How to Train
+To train the model, please edit the train.py to select the dataset you want to train the model on. The next few lines define some of the most critical parameters values. Then execute:
 
+```
+$ python3 train.py
+```
 
 ## How to Setup
 
