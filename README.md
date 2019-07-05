@@ -70,6 +70,12 @@ To train the model, please edit the train.py to select the dataset you want to t
 $ python3 train.py
 ```
 
+## How to Visualize Results
+
+```
+$ python3 visualize.py
+```
+
 ## How to Setup
 
 

@@ -106,8 +106,8 @@ dataset_name = "toy"  # FIXME : dataset name
 
 
 # FIXME : For toy dataset
-preds_dir = '../medium/toy/UnrolledGAN'
-out_dir_main = '../medium/figs/UnrolledGAN/'
+preds_dir    = 'medium/toy/socialWays'
+out_dir_main = 'medium/figs/socialWays/'
 
 # FIXME : For toy dataset
 Hinv = np.eye(3)
@@ -117,17 +117,21 @@ im_size = (480, 480, 3)
 
 
 # FIXME : for real datasets, load the video file
-homography_file = os.path.join('../data/' + dataset_name, 'H.txt')
+homography_file = os.path.join('data/' + dataset_name, 'H.txt')
 if os.path.exists(homography_file):
     Hinv = np.linalg.inv(np.loadtxt(homography_file))
+else:
+    print('[INF] No homography file')
 
-video_file = '../data/' + dataset_name + '/video.avi'  # FIXME: for BIWI
-image_file = '../data/' + dataset_name + '/reference.jpg'   # FIXME
+video_file = 'data/' + dataset_name + '/video.avi'  # FIXME: for BIWI
+image_file = 'data/' + dataset_name + '/reference.jpg'   # FIXME
 if os.path.exists(video_file):
+    print('[INF] Using video file'+video_file)
     cap = cv2.VideoCapture()
     time_offset = -12
 elif os.path.exists(image_file):
-    cap = None
+    print('[INF] Using image file '+image_file)
+    cap        = None
     use_ref_im = True
 
     # For test
@@ -142,9 +146,9 @@ elif os.path.exists(image_file):
     # Hinv[0, 2], Hinv[1, 2] = 550, 720
 
 else:  # toy dataset
+    print('[INF] No image nor video file')
     cap = None
     use_ref_im = False
-    ref_im = cv2.imread(image_file)
     Hinv[0, 0], Hinv[1, 1] = 200, 200
     Hinv[0, 2], Hinv[1, 2] = 240, 240
 
@@ -153,13 +157,14 @@ for dirpath, dirnames, filenames in sorted(os.walk(preds_dir)):
     for file_cntr, f in enumerate(sorted(filenames)):
         if 'stats' in f or not 'npz' in f: continue
         filename = os.path.join(dirpath, f)
-
+        print(filename)
         epc_str = f[:f.rfind('-')]
         if epc_str.isdigit():
             epc = int(epc_str)
         else:
             epc = epc_counter
             epc_counter += 1
+        if epc%1000!=0: continue
 
         # FIXME
         out_file = out_dir_main + '%05d' % epc + '.png'
@@ -233,7 +238,7 @@ for dirpath, dirnames, filenames in sorted(os.walk(preds_dir)):
         out_dir = out_file[:out_file.rfind('/')]
         os.makedirs(out_dir, exist_ok=True)
         cv2.imwrite(out_file, im)
-        print('writing image to ', out_file)
+        print('[INF] writing image to ', out_file)
 
         # draw_heatmap(im, preds_our_aug, cmap)
 
@@ -242,6 +247,3 @@ for dirpath, dirnames, filenames in sorted(os.walk(preds_dir)):
         # os.makedirs(out_dir, exist_ok=True)
         # cv2.imwrite(out_file, im)
         # print('writing image to ', out_file)
-
-
-

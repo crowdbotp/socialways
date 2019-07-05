@@ -88,7 +88,7 @@ dataset_obsv = torch.FloatTensor(dataset_obsv).cuda()
 dataset_pred = torch.FloatTensor(dataset_pred).cuda()
 # ================================================
 
-
+# Augment tensors of positions into positions+velocity
 def get_traj_4d(obsv_p, pred_p):
     obsv_v = obsv_p[:, 1:] - obsv_p[:, :-1]
     obsv_v = torch.cat([obsv_v[:, 0].unsqueeze(1), obsv_v], dim=1)
@@ -254,12 +254,16 @@ class Discriminator(nn.Module):
         bs = obsv.size(0)
         lstm_h_c = (torch.zeros(1, bs, self.lstm_dim).cuda(),
                     torch.zeros(1, bs, self.lstm_dim).cuda())
+        # Encoding of the observed sequence trhough an LSTM cell
         obsv_code, lstm_h_c = self.obsv_encoder_lstm(obsv, lstm_h_c)
+        # Further encoding through a FC layer
         obsv_code = self.obsv_encoder_fc(obsv_code[:, -1])
+        # Encoding of the predicted/next part of the sequence through a FC layer
         pred_code = self.pred_encoder(pred.view(-1, self.n_next*4))
         both_codes = torch.cat([obsv_code, pred_code], dim=1)
         # Applies classifier to the concatenation of the encodings of both parts
-        label = self.classifier(both_codes)
+        label    = self.classifier(both_codes)
+        # Inference on the latent code
         code_hat = self.latent_decoder(both_codes)
         return label, code_hat
 
@@ -270,7 +274,7 @@ class Discriminator(nn.Module):
                 if m_to.bias is not None:
                     m_to.bias.data = m_from.bias.data.clone()
 
-# LSTM path decoding module
+# FC path decoding module
 class DecoderFC(nn.Module):
     def __init__(self, hidden_dim):
         super(DecoderFC, self).__init__()
@@ -288,7 +292,7 @@ class DecoderFC(nn.Module):
         out = self.fc1(inp)
         return out
 
-
+# LSTM path decoding module
 class DecoderLstm(nn.Module):
     def __init__(self, input_size, hidden_size):
         super(DecoderLstm, self).__init__()
@@ -327,9 +331,11 @@ attention = AttentionPooling(hidden_size, social_feature_size).cuda()
 decoder = DecoderFC(hidden_size + social_feature_size + noise_len).cuda()
 # decoder = DecoderLstm(social_feature_size + VEL_VEC_LEN + noise_len, traj_code_len).cuda()
 
+# The Generator parameters and their optimizer
 predictor_params = chain(attention.parameters(), encoder.parameters(), decoder.parameters())
 predictor_optimizer = opt.Adam(predictor_params, lr=lr_g, betas=(0.9, 0.999))
 
+# The Discriminator parameters and their optimizer
 D = Discriminator(n_next, hidden_size, n_latent_codes).cuda()
 D_optimizer = opt.Adam(D.parameters(), lr=lr_d, betas=(0.9, 0.999))
 mse_loss = nn.MSELoss()
@@ -400,8 +406,10 @@ def train():
                 batch_size_accum + (the_batches[ii+1][1] - the_batches[ii+1][0]) > batch_size:
             # Observed partial paths
             obsv = dataset_obsv[sub_batches[0][0]:sub_batches[-1][1]]
+            # Future partial paths
             pred = dataset_pred[sub_batches[0][0]:sub_batches[-1][1]]
             sub_batches = sub_batches - sub_batches[0][0]
+            # May have to fill with 0
             filling_len = batch_size - int(batch_size_accum)
             obsv = torch.cat((obsv, torch.zeros(filling_len, n_past, 2).cuda()), dim=0)
             pred = torch.cat((pred, torch.zeros(filling_len, n_next, 2).cuda()), dim=0)
@@ -414,6 +422,7 @@ def train():
 
             # ============== Train Discriminator ================
             for u in range(n_unrolling_steps + 1):
+                # Zero the gradient buffers of all parameters
                 D.zero_grad()
                 with torch.no_grad():
                     pred_hat_4d = predict(obsv, noise, n_next, sub_batches)
@@ -438,19 +447,29 @@ def train():
                     backup = copy.deepcopy(D)
 
             # =============== Train Generator ================= #
+            # Zero the gradient buffers of all the discriminator parameters
             D.zero_grad()
+            # Zero the gradient buffers of all the generator parameters
             predictor_optimizer.zero_grad()
+            # Applies a forward step of prediction
             pred_hat_4d = predict(obsv, noise, n_next, sub_batches)
 
-            gen_labels, code_hat = D(obsv_4d, pred_hat_4d)  # classify a fake sample
-            g_loss_l2 = mse_loss(pred_hat_4d[:, :, :2], pred)
+            # Classify the generated fake sample
+            gen_labels, code_hat = D(obsv_4d, pred_hat_4d)
+            # L2 loss between the predicted paths and the true ones
+            g_loss_l2      = mse_loss(pred_hat_4d[:, :, :2], pred)
+            # Adversarial loss (classification labels should be close to one)
             g_loss_fooling = mse_loss(gen_labels, ones)
-            g_loss_info = mse_loss(code_hat.squeeze(), noise[:, :n_latent_codes])
+            # Information loss
+            g_loss_info    = mse_loss(code_hat.squeeze(), noise[:, :n_latent_codes])
 
-            #  FIXME: which loss functinos to use for G?
+            #  FIXME: which loss functions to use for G?
+            #
             g_loss = g_loss_fooling
+            # If using the info loss
             if use_info_loss:
                 g_loss += loss_info_w * g_loss_info
+            # If using the L2 loss
             if use_l2_loss:
                 g_loss += loss_l2_w * g_loss_l2
             if use_variety_loss:
@@ -590,6 +609,6 @@ for epoch in trange(start_epoch, n_epochs + 1):  # FIXME : set the number of epo
         }, model_file)
 
     if epoch % 5 == 0:
-        wr_dir = '../medium/' + dataset_name + '/' + model_name + '/' + str(epoch)
+        wr_dir = 'medium/' + dataset_name + '/' + model_name + '/' + str(epoch)
         os.makedirs(wr_dir, exist_ok=True)
         test(128, write_to_file=wr_dir, just_one=True)
