@@ -17,8 +17,8 @@ from utils.linear_models import predict_cv
 # ========== set input/output files ============
 dataset_name = 'toy'  # FIXME: Notice to select the proper dataset
 model_name = 'socialWays'
-input_file = '../toy.npz'
-model_file = '../trained_models/' + model_name + '-' + dataset_name + '.pt'
+input_file = 'toy.npz'
+model_file = 'trained_models/' + model_name + '-' + dataset_name + '.pt'
 
 # FIXME: ====== training hyper-parameters ======
 # Unrolled GAN
@@ -35,7 +35,9 @@ loss_l2_w = 0.5  # WARNING for both l2 and variety
 lr_g = 1E-3
 lr_d = 1E-4
 # FIXME: ====== Network Size ===================
+# Batch size
 batch_size = 128
+# LSTM hidden size
 hidden_size = 64
 n_epochs = 100000
 num_social_features = 3
@@ -49,21 +51,29 @@ use_social = False
 print(os.path.dirname(os.path.realpath(__file__)))
 
 data = np.load(input_file)
+# Data come as NxTx2 numpy nd-arrays where N is the number of trajectories,
+# T is their duration.
 dataset_obsv, dataset_pred, dataset_t, the_batches = \
     data['obsvs'], data['preds'], data['times'], data['batches']
+# 4/5 of the batches to be used for training
 train_size = max(1, (len(the_batches) * 4) // 5)
 train_batches = the_batches[:train_size]
+# Test batches are the remaining ones
 test_batches = the_batches[train_size:]
+# Size of the observed sub-paths
 n_past = dataset_obsv.shape[1]
+# Size of the sub-paths to predict
 n_next = dataset_pred.shape[1]
+# Number of training samples
 n_train_samples = the_batches[train_size-1][1]
+# Number of testing samples (the remaining ones)
 n_test_samples = dataset_obsv.shape[0] - n_train_samples
 if n_test_samples == 0:
     n_test_samples = 1
     the_batches = np.array([the_batches[0], the_batches[0]])
 print(input_file, ' # Training samples: ', n_train_samples)
 
-# normalize
+# Normalize the spatial data
 scale = Scale()
 scale.max_x = max(np.max(dataset_obsv[:, :, 0]), np.max(dataset_pred[:, :, 0]))
 scale.min_x = min(np.min(dataset_obsv[:, :, 0]), np.min(dataset_pred[:, :, 0]))
@@ -73,8 +83,7 @@ scale.calc_scale(keep_ratio=True)
 dataset_obsv = scale.normalize(dataset_obsv)
 dataset_pred = scale.normalize(dataset_pred)
 ss = scale.sx
-
-# Normalize
+# Copy normalized observations/paths to predict into torch GPU tensors
 dataset_obsv = torch.FloatTensor(dataset_obsv).cuda()
 dataset_pred = torch.FloatTensor(dataset_pred).cuda()
 # ================================================
@@ -90,7 +99,7 @@ def get_traj_4d(obsv_p, pred_p):
     pred_4d = torch.cat([pred_p, pred_v], dim=2)
     return obsv_4d, pred_4d
 
-
+# Evaluate the error between the model prediction and the true path
 def calc_error(pred_hat, pred):
     N = pred.size(0)
     T = pred.size(1)
@@ -191,22 +200,30 @@ def SocialFeatures(x, sub_batches):
 
     return social_features
 
-
+# LSTM path encoding module
 class EncoderLstm(nn.Module):
     def __init__(self, hidden_size, n_layers=2):
+        # Dimension of the hidden state (h)
         self.hidden_size = hidden_size
         super(EncoderLstm, self).__init__()
+        # Linear embedding 4xh
         self.embed = nn.Linear(4, self.hidden_size)
+        # The LSTM cell.
+        # Input dimension (observations mapped through embedding) is the same as the output
         self.lstm = nn.LSTM(self.hidden_size, self.hidden_size, num_layers=n_layers, batch_first=True)
         self.lstm_h = []
         # init_weights(self)
 
     def init_lstm(self, h, c):
+        # Initialization of the LSTM: hidden state and cell state
         self.lstm_h = (h, c)
 
     def forward(self, obsv):
+        # Batch size
         bs = obsv.shape[0]
+        # Linear embedding
         obsv = self.embed(obsv)
+        # Reshape and applies LSTM over a whole sequence or over one single step
         y, self.lstm_h = self.lstm(obsv.view(bs, -1, self.hidden_size), self.lstm_h)
         return y
 
@@ -216,14 +233,20 @@ class Discriminator(nn.Module):
         super(Discriminator, self).__init__()
         self.lstm_dim = hidden_dim
         self.n_next = n_next
+        # LSTM Encoder for the observed part
         self.obsv_encoder_lstm = nn.LSTM(4, hidden_dim, batch_first=True)
+        # FC sub-network: input is hidden_dim, output is hidden_dim//2. This ouput will be part of
+        # the input of the classifier.
         self.obsv_encoder_fc = nn.Sequential(nn.Linear(hidden_dim, hidden_dim//2), nn.LeakyReLU(0.2),
                                              nn.Linear(hidden_dim//2, hidden_dim//2))
+        # FC Encoder for the predicted part: input is n_next*4 (whole predicted trajectory), output is
+        # hidden_dim//2. This ouput will also be part of the input of the classifier.
         self.pred_encoder = nn.Sequential(nn.Linear(n_next*4, hidden_dim//2), nn.LeakyReLU(0.2),
                                           nn.Linear(hidden_dim//2, hidden_dim//2))
+        # Classifier: input is hidden_dim (concatenated encodings of observed and predicted trajectories), output is 1
         self.classifier = nn.Sequential(nn.Linear(hidden_dim, hidden_dim//2), nn.LeakyReLU(0.2),
                                         nn.Linear(hidden_dim//2, 1))
-
+        # Latent code inference: input is hidden_dim (concatenated encodings of observed and predicted trajectories), output is n_latent_code (distribution of latent codes)
         self.latent_decoder = nn.Sequential(nn.Linear(hidden_dim, hidden_dim//2), nn.LeakyReLU(0.2),
                                         nn.Linear(self.lstm_dim//2, n_latent_code))
 
@@ -235,6 +258,7 @@ class Discriminator(nn.Module):
         obsv_code = self.obsv_encoder_fc(obsv_code[:, -1])
         pred_code = self.pred_encoder(pred.view(-1, self.n_next*4))
         both_codes = torch.cat([obsv_code, pred_code], dim=1)
+        # Applies classifier to the concatenation of the encodings of both parts
         label = self.classifier(both_codes)
         code_hat = self.latent_decoder(both_codes)
         return label, code_hat
@@ -246,10 +270,11 @@ class Discriminator(nn.Module):
                 if m_to.bias is not None:
                     m_to.bias.data = m_from.bias.data.clone()
 
-
+# LSTM path decoding module
 class DecoderFC(nn.Module):
     def __init__(self, hidden_dim):
         super(DecoderFC, self).__init__()
+        # Fully connected sub-network. Input is hidden_dim, output is 2.
         self.fc1 = torch.nn.Sequential(torch.nn.Linear(hidden_dim, hidden_dim), nn.LeakyReLU(0.2),
                                        # torch.nn.Linear(64, 64), nn.LeakyReLU(0.2),
                                        torch.nn.Linear(hidden_dim, hidden_dim//2), nn.LeakyReLU(0.2),
@@ -257,7 +282,9 @@ class DecoderFC(nn.Module):
                                        torch.nn.Linear(hidden_dim//4, 2))
 
     def forward(self, h, s, z):
+        # For each sample in the batch, concatenate h (hidden state), s (social term) and z (noise)
         inp = torch.cat([h, s, z], dim=1)
+        # Applies the fully connected layer
         out = self.fc1(inp)
         return out
 
@@ -265,7 +292,9 @@ class DecoderFC(nn.Module):
 class DecoderLstm(nn.Module):
     def __init__(self, input_size, hidden_size):
         super(DecoderLstm, self).__init__()
+        # Decoding LSTM
         self.lstm = torch.nn.LSTM(input_size, hidden_size, num_layers=1, batch_first=True)
+        # Fully connected sub-network. Input is hidden_size, output is 2.
         self.fc = nn.Sequential(torch.nn.Linear(hidden_size, 64), nn.Sigmoid(),
                                 torch.nn.Linear(64, 64), nn.LeakyReLU(0.2),
                                 torch.nn.Linear(64, 32), nn.LeakyReLU(0.2),
@@ -275,20 +304,26 @@ class DecoderLstm(nn.Module):
         self.lstm_h = []
 
     def init_lstm(self, h, c):
+        # Initialization of the LSTM: hidden state and cell state
         self.lstm_h = (h, c)
 
     def forward(self, h, s, z):
+        # Batch size
         bs = z.shape[0]
+        # For each sample in the batch, concatenate h (hidden state), s (social term) and z (noise)
         inp = torch.cat([h, s, z], dim=1)
+        # Applies a forward step.
         out, self.lstm_h = self.lstm(inp.unsqueeze(1), self.lstm_h)
+        # Applies the fully connected layer to the LSTM output
         out = self.fc(out.squeeze())
         return out
 
-
+# LSTM-based path encoder
 encoder = EncoderLstm(hidden_size, n_lstm_layers).cuda()
 feature_embedder = EmbedSocialFeatures(num_social_features, social_feature_size).cuda()
 attention = AttentionPooling(hidden_size, social_feature_size).cuda()
 
+# Decoder
 decoder = DecoderFC(hidden_size + social_feature_size + noise_len).cuda()
 # decoder = DecoderLstm(social_feature_size + VEL_VEC_LEN + noise_len, traj_code_len).cuda()
 
@@ -304,13 +339,17 @@ print('hidden dim = %d | lr(G) =  %.5f | lr(D) =  %.5f' % (hidden_size, lr_g, lr
 
 
 def predict(obsv_p, noise, n_next, sub_batches=[]):
+    # Batch size
     bs = obsv_p.shape[0]
+    # Adds the velocity component to the observations.
+    # This makes of obsv_4d a batch_sizexTx4 tensor
     obsv_4d = get_traj_4d(obsv_p, [])
-
-    # Run Obsv-Encoder
-    lstm_h_c = (torch.zeros(n_lstm_layers, bs, encoder.hidden_size).cuda(),
+    # Initial values for the hidden and cell states (zero)
+    lstm_h_c = (torch.zeros(n_lstm_layers, bs,          encoder.hidden_size).cuda(),
                 torch.zeros(n_lstm_layers, bs, encoder.hidden_size).cuda())
     encoder.init_lstm(lstm_h_c[0], lstm_h_c[1])
+    # Apply the encoder to the observed sequence
+    # obsv_4d: batch_sizexTx4 tensor
     encoder(obsv_4d)
 
     if use_social:
@@ -322,11 +361,19 @@ def predict(obsv_p, noise, n_next, sub_batches=[]):
 
     pred_4ds = []
     last_obsv = obsv_4d[:, -1]
+    # For all the steps to predict, applies a step of the decoder
     for ii in range(n_next):
-        new_v = decoder(encoder.lstm_h[0].view(bs, -1), weighted_features, noise).view(bs, 2) # + last_obsv[:, 2:]
+        # Takes the current output of the encoder to feed the decoder
+        # Gets the ouputs as a displacement/velocity
+        new_v = decoder(encoder.lstm_h[0].view(bs, -1), weighted_features, noise).view(bs, 2)
+        # Deduces the predicted position
         new_p = new_v + last_obsv[:, :2]
+        # The last prediction done will be new_p,new_v
         last_obsv = torch.cat([new_p, new_v], dim=1)
+        # Keeps all the predictions
         pred_4ds.append(last_obsv)
+        # Applies LSTM encoding to the last prediction
+        # pred_4ds[-1]: batch_sizex4 tensor
         encoder(pred_4ds[-1])
 
     return torch.stack(pred_4ds, 1)
@@ -336,8 +383,10 @@ def predict(obsv_p, noise, n_next, sub_batches=[]):
 # =============== Training Loop ==================
 def train():
     tic = time.clock()
+    # Evaluation metrics (ADE/FDE)
     train_ADE, train_FDE = 0, 0
     batch_size_accum = 0; sub_batches = []
+    # For all the training batches
     for ii, batch_i in enumerate(train_batches):
         batch_size_accum += batch_i[1] - batch_i[0]
         sub_batches.append(batch_i)
@@ -349,6 +398,7 @@ def train():
 
         if ii >= train_size-1 or \
                 batch_size_accum + (the_batches[ii+1][1] - the_batches[ii+1][0]) > batch_size:
+            # Observed partial paths
             obsv = dataset_obsv[sub_batches[0][0]:sub_batches[-1][1]]
             pred = dataset_pred[sub_batches[0][0]:sub_batches[-1][1]]
             sub_batches = sub_batches - sub_batches[0][0]
@@ -356,6 +406,7 @@ def train():
             obsv = torch.cat((obsv, torch.zeros(filling_len, n_past, 2).cuda()), dim=0)
             pred = torch.cat((pred, torch.zeros(filling_len, n_next, 2).cuda()), dim=0)
 
+            # Completes the positional vectors with velocities (to have dimension 4)
             obsv_4d, pred_4d = get_traj_4d(obsv, pred)
             zeros = Variable(torch.zeros(batch_size, 1) + np.random.uniform(0, 0.1), requires_grad=False).cuda()
             ones = Variable(torch.ones(batch_size, 1) * np.random.uniform(0.9, 1.0), requires_grad=False).cuda()
@@ -368,15 +419,17 @@ def train():
                     pred_hat_4d = predict(obsv, noise, n_next, sub_batches)
 
                 fake_labels, code_hat = D(obsv_4d, pred_hat_4d)  # classify fake samples
+                # Evaluate the MSE loss: the fake_labels should be close to zero
                 d_loss_fake = mse_loss(fake_labels, zeros)
                 d_loss_info = mse_loss(code_hat.squeeze(), noise[:, :n_latent_codes])
-
+                # Evaluate the MSE loss: the real should be close to one
                 real_labels, code_hat = D(obsv_4d, pred_4d)  # classify real samples
                 d_loss_real = mse_loss(real_labels, ones)
 
                 #  FIXME: which loss functinos to use for D?
                 d_loss = d_loss_fake + d_loss_real
                 if use_info_loss:
+                    #
                     d_loss += loss_info_w * d_loss_info
                 d_loss.backward()  # update D
                 D_optimizer.step()
@@ -496,7 +549,7 @@ def test(n_gen_samples=20, linear=False, write_to_file=None, just_one=False):
 # ===================== M A I N =========================
 # =======================================================
 if os.path.isfile(model_file):
-    print('loading from ' + model_file)
+    print('Loading model from ' + model_file)
     checkpoint = torch.load(model_file)
     start_epoch = checkpoint['epoch'] + 1
     attention.load_state_dict(checkpoint['attentioner_dict'])
@@ -519,6 +572,7 @@ else:
 
 # ===================== TRAIN =========================
 for epoch in trange(start_epoch, n_epochs + 1):  # FIXME : set the number of epochs
+    # Main training function
     train()
 
     # ============== Save model on disk ===============
@@ -539,4 +593,3 @@ for epoch in trange(start_epoch, n_epochs + 1):  # FIXME : set the number of epo
         wr_dir = '../medium/' + dataset_name + '/' + model_name + '/' + str(epoch)
         os.makedirs(wr_dir, exist_ok=True)
         test(128, write_to_file=wr_dir, just_one=True)
-
