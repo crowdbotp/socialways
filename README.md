@@ -77,7 +77,12 @@ $ python3 visualize.py
 ```
 
 ## How to Setup
-
+To run this code you better to use python >= 3.5.
+You can use pip to install the required packages.
+```bash
+$ pip install torch torchvision numpy matplotlib tqdm nose
+$ pip install seaborn python-opencv   # to run visualize.py
+```
 
 
 ## How to Cite
