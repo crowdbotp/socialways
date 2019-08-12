@@ -3,7 +3,7 @@ import math
 import sys
 import numpy as np
 import os
-from pandas import DataFrame, concat
+# from pandas import DataFrame, concat
 
 
 class Scale(object):
@@ -401,49 +401,49 @@ class SeyfriedParser:
 
         return p_data, v_data, t_data
 
-
-def to_supervised(data, n_in=1, n_out=1, diff_in=False, diff_out=True, drop_nan=True):
-    '''
-    @CopyRight: Code is inspired by weblog of machinelearningmastery.com
-    Copies the data columns (of an nD sequence) so that for each timestep you have a "in" seq and an "out" seq
-    :param data:
-    :param n_in: length of "in" seq (number of observations)
-    :param n_out: length of "out" seq (number of predictions)
-    :param diff_in: if True the "in" columns are differential otherwise will be absolute
-    :param diff_out: if True the "out" columns are differential otherwise will be absolute
-    :param drop_nan: if True eliminate the samples that contains nan (due to shift operation)
-    :return: a table whose columns are n_in * nD (observations) and then n_out * nD (predictions)
-    '''
-
-    n_vars = 1 if type(data) is list else data.shape[1]
-    df = DataFrame(data)
-    cols, names = list(), list()
-
-    # input sequence (t-n, ... t-1)
-    for i in range(n_in, 0, -1):
-        names += [('var_in%d(t-%d)' % (j + 1, i-1)) for j in range(n_vars)]
-        if diff_in:
-            cols.append(df.shift(i-1) - df.shift(i))
-        else:
-            cols.append(df.shift(i-1))
-
-    # forecast sequence (t, t+1, ... t+n)
-    for i in range(1, n_out+1):
-        names += [('var_out%d(t+%d)' % (j + 1, i)) for j in range(n_vars)]
-        if diff_out:
-            cols.append(df.shift(-i) - df.shift(0))  # displacement
-        else:
-            cols.append(df.shift(-i))  # position
-
-    # put it all together
-    agg = concat(cols, axis=1)
-    agg.columns = names
-
-    # drop rows with NaN values
-    if drop_nan:
-        agg.dropna(inplace=True)
-
-    return agg.values
+#
+# def to_supervised(data, n_in=1, n_out=1, diff_in=False, diff_out=True, drop_nan=True):
+#     '''
+#     @CopyRight: Code is inspired by weblog of machinelearningmastery.com
+#     Copies the data columns (of an nD sequence) so that for each timestep you have a "in" seq and an "out" seq
+#     :param data:
+#     :param n_in: length of "in" seq (number of observations)
+#     :param n_out: length of "out" seq (number of predictions)
+#     :param diff_in: if True the "in" columns are differential otherwise will be absolute
+#     :param diff_out: if True the "out" columns are differential otherwise will be absolute
+#     :param drop_nan: if True eliminate the samples that contains nan (due to shift operation)
+#     :return: a table whose columns are n_in * nD (observations) and then n_out * nD (predictions)
+#     '''
+#
+#     n_vars = 1 if type(data) is list else data.shape[1]
+#     df = DataFrame(data)
+#     cols, names = list(), list()
+#
+#     # input sequence (t-n, ... t-1)
+#     for i in range(n_in, 0, -1):
+#         names += [('var_in%d(t-%d)' % (j + 1, i-1)) for j in range(n_vars)]
+#         if diff_in:
+#             cols.append(df.shift(i-1) - df.shift(i))
+#         else:
+#             cols.append(df.shift(i-1))
+#
+#     # forecast sequence (t, t+1, ... t+n)
+#     for i in range(1, n_out+1):
+#         names += [('var_out%d(t+%d)' % (j + 1, i)) for j in range(n_vars)]
+#         if diff_out:
+#             cols.append(df.shift(-i) - df.shift(0))  # displacement
+#         else:
+#             cols.append(df.shift(-i))  # position
+#
+#     # put it all together
+#     agg = concat(cols, axis=1)
+#     agg.columns = names
+#
+#     # drop rows with NaN values
+#     if drop_nan:
+#         agg.dropna(inplace=True)
+#
+#     return agg.values
 
 
 def create_dataset(p_data, t_data, t_range, n_past=8, n_next=12):
