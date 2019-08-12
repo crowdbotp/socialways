@@ -13,11 +13,10 @@ from utils.parse_utils import Scale
 from torch.utils.data import DataLoader
 from utils.linear_models import predict_cv
 
-
 # ========== set input/output files ============
-dataset_name = 'toy'  # FIXME: Notice to select the proper dataset
+dataset_name = 'eth'  # FIXME: Notice to select the proper dataset
 model_name = 'socialWays'
-input_file = 'toy.npz'
+input_file = '../eth-8-12.npz'
 model_file = 'trained_models/' + model_name + '-' + dataset_name + '.pt'
 
 # FIXME: ====== training hyper-parameters ======
@@ -44,7 +43,7 @@ num_social_features = 3
 social_feature_size = hidden_size
 noise_len = hidden_size // 2
 n_lstm_layers = 1
-use_social = False
+use_social = True
 # ==============================================
 
 # FIXME: ======= Loda Data =====================
@@ -65,7 +64,7 @@ n_past = dataset_obsv.shape[1]
 # Size of the sub-paths to predict
 n_next = dataset_pred.shape[1]
 # Number of training samples
-n_train_samples = the_batches[train_size-1][1]
+n_train_samples = the_batches[train_size - 1][1]
 # Number of testing samples (the remaining ones)
 n_test_samples = dataset_obsv.shape[0] - n_train_samples
 if n_test_samples == 0:
@@ -86,6 +85,8 @@ ss = scale.sx
 # Copy normalized observations/paths to predict into torch GPU tensors
 dataset_obsv = torch.FloatTensor(dataset_obsv).cuda()
 dataset_pred = torch.FloatTensor(dataset_pred).cuda()
+
+
 # ================================================
 
 # Augment tensors of positions into positions+velocity
@@ -99,15 +100,16 @@ def get_traj_4d(obsv_p, pred_p):
     pred_4d = torch.cat([pred_p, pred_v], dim=2)
     return obsv_4d, pred_4d
 
+
 # Evaluate the error between the model prediction and the true path
 def calc_error(pred_hat, pred):
     N = pred.size(0)
     T = pred.size(1)
-    err_all = torch.pow((pred_hat - pred)/ss, 2).sum(dim=2).sqrt()  # N x T
+    err_all = torch.pow((pred_hat - pred) / ss, 2).sum(dim=2).sqrt()  # N x T
     FDEs = err_all.sum(dim=0).item() / N
     ADEs = torch.cumsum(FDEs)
     for ii in range(T):
-        ADEs[ii] /= (ii+1)
+        ADEs[ii] /= (ii + 1)
     return ADEs.data.cpu().numpy(), FDEs.data().cpu().numpy()
 
 
@@ -131,7 +133,7 @@ class AttentionPooling(nn.Module):
                     if ii == kk: continue
                     k_counter += 1
                     fik = f[ii][k_counter]
-                    sigma_i[kk-sb[0]] = torch.dot(fik.squeeze(), Wh[kk].squeeze()) * (N-1)/np.sqrt(self.f_dim)
+                    sigma_i[kk - sb[0]] = torch.dot(fik.squeeze(), Wh[kk].squeeze()) * (N - 1) / np.sqrt(self.f_dim)
                 attentions = torch.softmax(sigma_i, dim=0)
                 S[ii] = torch.mm(attentions.view(1, N), h[sb[0]:sb[1]])
 
@@ -177,28 +179,76 @@ def Bearing(xA_4d, xB_4d):
     return cos_theta
 
 
+def DCA_MTX(x_4d, D_4d):
+    Dp = D_4d[:, :, :2]
+    Dv = D_4d[:, :, 2:]
+    DOT_Dp_Dv = torch.mul(Dp[:,:,0], Dv[:,:,0]) + torch.mul(Dp[:,:,1], Dv[:,:,1])
+    Dv_sq = torch.mul(Dv[:,:,0], Dv[:,:,0]) + torch.mul(Dv[:,:,1], Dv[:,:,1]) + 1E-6
+    TTCA = -torch.div(DOT_Dp_Dv, Dv_sq)
+    DCA = torch.zeros_like(Dp)
+    DCA[:, :, 0] = Dp[:, :, 0] + TTCA * Dv[:, :, 0]
+    DCA[:, :, 1] = Dp[:, :, 1] + TTCA * Dv[:, :, 1]
+    DCA = torch.norm(DCA, dim=2)
+    return DCA
+
+
+def BearingMTX(x_4d, D_4d):
+    Dp = D_4d[:, :, :2]  # NxNx2
+    v = x_4d[:, 2:].unsqueeze(1).repeat(1, x_4d.shape[0], 1)  # => NxNx2
+    DOT_Dp_v = Dp[:, :, 0] * v[:, :, 0] + Dp[:, :, 1] * v[:, :, 1]
+    COS_THETA = torch.div(DOT_Dp_v, torch.norm(Dp, dim=2) * torch.norm(v, dim=2) + 1E-6)
+    return COS_THETA
+
+
 def SocialFeatures(x, sub_batches):
+    N = x.shape[0]  # x is NxTx4 tensor
     if len(sub_batches) == 0:
-        sub_batches = [[0, x.shape[0]]]
-    social_features = [] # x.shape[0]*[None]
+        sub_batches = [[0, N]]
+    social_features = []
+
+    x_ver_repeat = x[:, -1].unsqueeze(0).repeat(N, 1, 1)
+    x_hor_repeat = x[:, -1].unsqueeze(1).repeat(1, N, 1)
+    Dx_mat = x_hor_repeat - x_ver_repeat
+
+    l2_dist_MTX = Dx_mat[:, :, :2].norm(dim=2)
+    bearings_MTX = BearingMTX(x[:, -1], Dx_mat)
+    dcas_MTX = DCA_MTX(x[:, -1], Dx_mat)
+    sFeatures_MTX = torch.stack([l2_dist_MTX, bearings_MTX, dcas_MTX], dim=2)
     for sb in sub_batches:
         if sb[1] - sb[0] == 1:
             social_features.append([])
             continue
         for ii in range(sb[0], sb[1]):
-            xi = x[ii, -1]
-            features_i = []
-            for jj in range(sb[0], sb[1]):
-                if ii == jj: continue
-                xj = x[jj, -1]
-                distance = (xi - xj).norm()
-                bearing = Bearing(xi, xj)
-                dca = DCA(xi, xj)
-                feature_list = [distance, bearing, dca]
-                features_i.append(torch.stack(feature_list))
-            social_features.append(features_i)
+            features_i = sFeatures_MTX[ii, sb[0]:sb[1]]
+            if ii == sb[0]:
+                social_features.append(features_i[1:])
+            elif ii == sb[1]-1:
+                social_features.append(features_i[:-1])
+            else:
+                social_features.append(torch.cat([features_i[:ii-sb[0]], features_i[ii-sb[0]+1:]]))
 
     return social_features
+
+    ## ===== Old implementation =====
+    # for sb in sub_batches:
+    #     if sb[1] - sb[0] == 1:
+    #         social_features.append([])
+    #         continue
+    #     for ii in range(sb[0], sb[1]):
+    #         xi = x[ii, -1]
+    #         features_i = []
+    #         for jj in range(sb[0], sb[1]):
+    #             if ii == jj: continue
+    #             xj = x[jj, -1]
+    #             distance = (xi - xj).norm()
+    #             bearing = Bearing(xi, xj)
+    #             dca = DCA(xi, xj)
+    #             feature_list = [distance, bearing, dca]
+    #             features_i.append(torch.stack(feature_list))
+    #         social_features.append(features_i)
+    #
+    # return social_features
+
 
 # LSTM path encoding module
 class EncoderLstm(nn.Module):
@@ -237,18 +287,18 @@ class Discriminator(nn.Module):
         self.obsv_encoder_lstm = nn.LSTM(4, hidden_dim, batch_first=True)
         # FC sub-network: input is hidden_dim, output is hidden_dim//2. This ouput will be part of
         # the input of the classifier.
-        self.obsv_encoder_fc = nn.Sequential(nn.Linear(hidden_dim, hidden_dim//2), nn.LeakyReLU(0.2),
-                                             nn.Linear(hidden_dim//2, hidden_dim//2))
+        self.obsv_encoder_fc = nn.Sequential(nn.Linear(hidden_dim, hidden_dim // 2), nn.LeakyReLU(0.2),
+                                             nn.Linear(hidden_dim // 2, hidden_dim // 2))
         # FC Encoder for the predicted part: input is n_next*4 (whole predicted trajectory), output is
         # hidden_dim//2. This ouput will also be part of the input of the classifier.
-        self.pred_encoder = nn.Sequential(nn.Linear(n_next*4, hidden_dim//2), nn.LeakyReLU(0.2),
-                                          nn.Linear(hidden_dim//2, hidden_dim//2))
+        self.pred_encoder = nn.Sequential(nn.Linear(n_next * 4, hidden_dim // 2), nn.LeakyReLU(0.2),
+                                          nn.Linear(hidden_dim // 2, hidden_dim // 2))
         # Classifier: input is hidden_dim (concatenated encodings of observed and predicted trajectories), output is 1
-        self.classifier = nn.Sequential(nn.Linear(hidden_dim, hidden_dim//2), nn.LeakyReLU(0.2),
-                                        nn.Linear(hidden_dim//2, 1))
+        self.classifier = nn.Sequential(nn.Linear(hidden_dim, hidden_dim // 2), nn.LeakyReLU(0.2),
+                                        nn.Linear(hidden_dim // 2, 1))
         # Latent code inference: input is hidden_dim (concatenated encodings of observed and predicted trajectories), output is n_latent_code (distribution of latent codes)
-        self.latent_decoder = nn.Sequential(nn.Linear(hidden_dim, hidden_dim//2), nn.LeakyReLU(0.2),
-                                        nn.Linear(self.lstm_dim//2, n_latent_code))
+        self.latent_decoder = nn.Sequential(nn.Linear(hidden_dim, hidden_dim // 2), nn.LeakyReLU(0.2),
+                                            nn.Linear(self.lstm_dim // 2, n_latent_code))
 
     def forward(self, obsv, pred):
         bs = obsv.size(0)
@@ -259,20 +309,21 @@ class Discriminator(nn.Module):
         # Further encoding through a FC layer
         obsv_code = self.obsv_encoder_fc(obsv_code[:, -1])
         # Encoding of the predicted/next part of the sequence through a FC layer
-        pred_code = self.pred_encoder(pred.view(-1, self.n_next*4))
+        pred_code = self.pred_encoder(pred.view(-1, self.n_next * 4))
         both_codes = torch.cat([obsv_code, pred_code], dim=1)
         # Applies classifier to the concatenation of the encodings of both parts
-        label    = self.classifier(both_codes)
+        label = self.classifier(both_codes)
         # Inference on the latent code
         code_hat = self.latent_decoder(both_codes)
         return label, code_hat
 
     def load(self, backup):
         for m_from, m_to in zip(backup.modules(), self.modules()):
-             if isinstance(m_to, nn.Linear):
+            if isinstance(m_to, nn.Linear):
                 m_to.weight.data = m_from.weight.data.clone()
                 if m_to.bias is not None:
                     m_to.bias.data = m_from.bias.data.clone()
+
 
 # FC path decoding module
 class DecoderFC(nn.Module):
@@ -281,9 +332,9 @@ class DecoderFC(nn.Module):
         # Fully connected sub-network. Input is hidden_dim, output is 2.
         self.fc1 = torch.nn.Sequential(torch.nn.Linear(hidden_dim, hidden_dim), nn.LeakyReLU(0.2),
                                        # torch.nn.Linear(64, 64), nn.LeakyReLU(0.2),
-                                       torch.nn.Linear(hidden_dim, hidden_dim//2), nn.LeakyReLU(0.2),
-                                       torch.nn.Linear(hidden_dim//2, hidden_dim//4),
-                                       torch.nn.Linear(hidden_dim//4, 2))
+                                       torch.nn.Linear(hidden_dim, hidden_dim // 2), nn.LeakyReLU(0.2),
+                                       torch.nn.Linear(hidden_dim // 2, hidden_dim // 4),
+                                       torch.nn.Linear(hidden_dim // 4, 2))
 
     def forward(self, h, s, z):
         # For each sample in the batch, concatenate h (hidden state), s (social term) and z (noise)
@@ -291,6 +342,7 @@ class DecoderFC(nn.Module):
         # Applies the fully connected layer
         out = self.fc1(inp)
         return out
+
 
 # LSTM path decoding module
 class DecoderLstm(nn.Module):
@@ -302,7 +354,7 @@ class DecoderLstm(nn.Module):
         self.fc = nn.Sequential(torch.nn.Linear(hidden_size, 64), nn.Sigmoid(),
                                 torch.nn.Linear(64, 64), nn.LeakyReLU(0.2),
                                 torch.nn.Linear(64, 32), nn.LeakyReLU(0.2),
-                                torch.nn.Linear(32,  2))
+                                torch.nn.Linear(32, 2))
 
         # init_weights(self)
         self.lstm_h = []
@@ -321,6 +373,7 @@ class DecoderLstm(nn.Module):
         # Applies the fully connected layer to the LSTM output
         out = self.fc(out.squeeze())
         return out
+
 
 # LSTM-based path encoder
 encoder = EncoderLstm(hidden_size, n_lstm_layers).cuda()
@@ -351,7 +404,7 @@ def predict(obsv_p, noise, n_next, sub_batches=[]):
     # This makes of obsv_4d a batch_sizexTx4 tensor
     obsv_4d = get_traj_4d(obsv_p, [])
     # Initial values for the hidden and cell states (zero)
-    lstm_h_c = (torch.zeros(n_lstm_layers, bs,          encoder.hidden_size).cuda(),
+    lstm_h_c = (torch.zeros(n_lstm_layers, bs, encoder.hidden_size).cuda(),
                 torch.zeros(n_lstm_layers, bs, encoder.hidden_size).cuda())
     encoder.init_lstm(lstm_h_c[0], lstm_h_c[1])
     # Apply the encoder to the observed sequence
@@ -383,6 +436,8 @@ def predict(obsv_p, noise, n_next, sub_batches=[]):
         encoder(pred_4ds[-1])
 
     return torch.stack(pred_4ds, 1)
+
+
 # ===================================================
 
 
@@ -391,7 +446,8 @@ def train():
     tic = time.clock()
     # Evaluation metrics (ADE/FDE)
     train_ADE, train_FDE = 0, 0
-    batch_size_accum = 0; sub_batches = []
+    batch_size_accum = 0;
+    sub_batches = []
     # For all the training batches
     for ii, batch_i in enumerate(train_batches):
         batch_size_accum += batch_i[1] - batch_i[0]
@@ -402,8 +458,8 @@ def train():
         # batch_size_accum = sub_batches[-1][1]
         # ii = train_size-1
 
-        if ii >= train_size-1 or \
-                batch_size_accum + (the_batches[ii+1][1] - the_batches[ii+1][0]) > batch_size:
+        if ii >= train_size - 1 or \
+                batch_size_accum + (the_batches[ii + 1][1] - the_batches[ii + 1][0]) > batch_size:
             # Observed partial paths
             obsv = dataset_obsv[sub_batches[0][0]:sub_batches[-1][1]]
             # Future partial paths
@@ -457,11 +513,11 @@ def train():
             # Classify the generated fake sample
             gen_labels, code_hat = D(obsv_4d, pred_hat_4d)
             # L2 loss between the predicted paths and the true ones
-            g_loss_l2      = mse_loss(pred_hat_4d[:, :, :2], pred)
+            g_loss_l2 = mse_loss(pred_hat_4d[:, :, :2], pred)
             # Adversarial loss (classification labels should be close to one)
             g_loss_fooling = mse_loss(gen_labels, ones)
             # Information loss
-            g_loss_info    = mse_loss(code_hat.squeeze(), noise[:, :n_latent_codes])
+            g_loss_info = mse_loss(code_hat.squeeze(), noise[:, :n_latent_codes])
 
             #  FIXME: which loss functions to use for G?
             #
@@ -492,13 +548,14 @@ def train():
 
             # calculate error
             with torch.no_grad():  # TODO: use the function above
-                err_all = torch.pow((pred_hat_4d[:, :, :2] - pred)/ss, 2)
+                err_all = torch.pow((pred_hat_4d[:, :, :2] - pred) / ss, 2)
                 err_all = err_all.sum(dim=2).sqrt()
                 e = err_all.sum().item() / n_next
                 train_ADE += e
                 train_FDE += err_all[:, -1].sum().item()
 
-            batch_size_accum = 0; sub_batches = []
+            batch_size_accum = 0;
+            sub_batches = []
 
     train_ADE /= n_train_samples
     train_FDE /= n_train_samples
@@ -525,24 +582,24 @@ def test(n_gen_samples=20, linear=False, write_to_file=None, just_one=False):
             linear_preds = predict_cv(obsv, n_next)
             if linear and not write_to_file:
                 all_20_preds.append(linear_preds.unsqueeze(0))
-                err_all = torch.pow((linear_preds[:, :, :2] - pred)/ss, 2).sum(dim=2, keepdim=True).sqrt()
+                err_all = torch.pow((linear_preds[:, :, :2] - pred) / ss, 2).sum(dim=2, keepdim=True).sqrt()
                 all_20_errors.append(err_all.unsqueeze(0))
             else:
                 for kk in range(n_gen_samples):
                     noise = torch.FloatTensor(torch.rand(bs, noise_len)).cuda()
                     pred_hat_4d = predict(obsv, noise, n_next)
                     all_20_preds.append(pred_hat_4d.unsqueeze(0))
-                    err_all = torch.pow((pred_hat_4d[:, :, :2] - pred)/ss, 2).sum(dim=2, keepdim=True).sqrt()
+                    err_all = torch.pow((pred_hat_4d[:, :, :2] - pred) / ss, 2).sum(dim=2, keepdim=True).sqrt()
                     all_20_errors.append(err_all.unsqueeze(0))
 
             all_20_errors = torch.cat(all_20_errors)
             if write_to_file:
                 file_name = os.path.join(write_to_file, str(epoch) + '-' + str(current_t) + '.npz')
                 print('saving to ', file_name)
-                np_obsvs = scale.denormalize(obsv[:,:,:2].data.cpu().numpy())
-                np_preds_our = scale.denormalize(torch.cat(all_20_preds)[:,:,:,:2].data.cpu().numpy())
-                np_preds_gtt = scale.denormalize(pred[:,:,:2].data.cpu().numpy())
-                np_preds_lnr = scale.denormalize(linear_preds[:,:,:2].data.cpu().numpy())
+                np_obsvs = scale.denormalize(obsv[:, :, :2].data.cpu().numpy())
+                np_preds_our = scale.denormalize(torch.cat(all_20_preds)[:, :, :, :2].data.cpu().numpy())
+                np_preds_gtt = scale.denormalize(pred[:, :, :2].data.cpu().numpy())
+                np_preds_lnr = scale.denormalize(linear_preds[:, :, :2].data.cpu().numpy())
                 np.savez(file_name, timestamp=current_t,
                          obsvs=np_obsvs, preds_our=np_preds_our, preds_gtt=np_preds_gtt, preds_lnr=np_preds_lnr)
 
@@ -582,7 +639,6 @@ else:
     min_train_ADE = 10000
     start_epoch = 1
 
-
 # FIXME: comment here to train
 # wr_dir = '../preds-iccv/' + dataset_name + '/' + model_name + '/' + str(0000)
 # os.makedirs(wr_dir, exist_ok=True)
@@ -609,6 +665,6 @@ for epoch in trange(start_epoch, n_epochs + 1):  # FIXME : set the number of epo
         }, model_file)
 
     if epoch % 5 == 0:
-        wr_dir = 'medium/' + dataset_name + '/' + model_name + '/' + str(epoch)
+        wr_dir = '../medium/' + dataset_name + '/' + model_name + '/' + str(epoch)
         os.makedirs(wr_dir, exist_ok=True)
         test(128, write_to_file=wr_dir, just_one=True)
