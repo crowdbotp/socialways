@@ -35,7 +35,7 @@ lr_g = 1E-3
 lr_d = 1E-4
 # FIXME: ====== Network Size ===================
 # Batch size
-batch_size = 128
+batch_size = 256
 # LSTM hidden size
 hidden_size = 64
 n_epochs = 100000
@@ -43,7 +43,7 @@ num_social_features = 3
 social_feature_size = hidden_size
 noise_len = hidden_size // 2
 n_lstm_layers = 1
-use_social = True
+use_social = False
 # ==============================================
 
 # FIXME: ======= Loda Data =====================
@@ -126,15 +126,22 @@ class AttentionPooling(nn.Module):
         for sb in sub_batches:
             N = sb[1] - sb[0]
             if N == 1: continue
+
             for ii in range(sb[0], sb[1]):
-                sigma_i = torch.ones((N), dtype=h.dtype, device=h.device) * (-1000)
-                k_counter = -1
-                for kk in range(sb[0], sb[1]):
-                    if ii == kk: continue
-                    k_counter += 1
-                    fik = f[ii][k_counter]
-                    sigma_i[kk - sb[0]] = torch.dot(fik.squeeze(), Wh[kk].squeeze()) * (N - 1) / np.sqrt(self.f_dim)
-                attentions = torch.softmax(sigma_i, dim=0)
+                fi = f[ii, sb[0]:sb[1]]
+                sigma_i = torch.bmm(fi.unsqueeze(1), Wh[sb[0]:sb[1]]. unsqueeze(2))
+                sigma_i[ii-sb[0]] = -1000
+
+                ## ====== Old implementation =========
+                # sigma_i = torch.ones((N), dtype=h.dtype, device=h.device) * (-1000)
+                # k_counter = -1
+                # for kk in range(sb[0], sb[1]):
+                #     if ii == kk: continue
+                #     k_counter += 1
+                #     fik = f[ii][k_counter]
+                #     sigma_i[kk - sb[0]] = torch.dot(fik.squeeze(), Wh[kk].squeeze()) * (N - 1) / np.sqrt(self.f_dim)
+
+                attentions = torch.softmax(sigma_i.squeeze(), dim=0)
                 S[ii] = torch.mm(attentions.view(1, N), h[sb[0]:sb[1]])
 
         return S
@@ -145,22 +152,27 @@ class EmbedSocialFeatures(nn.Module):
         super(EmbedSocialFeatures, self).__init__()
         self.input_size = input_size
         self.hidden_size = hidden_size
-        self.fc1 = nn.Sequential(nn.Linear(input_size, 32), nn.ReLU())
-        self.fc2 = nn.Sequential(nn.Linear(32, 64), nn.ReLU())
-        self.fc3 = nn.Linear(64, hidden_size)
+        self.fc = nn.Sequential(nn.Linear(input_size, 32), nn.ReLU(),
+                                nn.Linear(32, 64), nn.ReLU(),
+                                nn.Linear(64, hidden_size))
 
     def forward(self, ftr_list, sub_batches):
-        embedded_features = []
-        for ftrs in ftr_list:
-            emb_i = []
-            for kk in range(len(ftrs)):
-                h = self.fc1(ftrs[kk].unsqueeze(0))
-                h = self.fc2(h)
-                h = self.fc3(h)
-                emb_i.append(h)
-            embedded_features.append(emb_i)
-
+        embedded_features = self.fc(ftr_list)
         return embedded_features
+
+        ##  ====== Old implementation ======
+        # embedded_features = []
+        # for ftrs in ftr_list:
+        #     emb_i = []
+        #
+        #     if len(ftrs) > 0:
+        #         h = self.fc(ftrs)
+        #     for kk in range(len(ftrs)):
+        #         emb_i.append(h[kk])
+        #
+        #     embedded_features.append(emb_i)
+        #
+        # return embedded_features
 
 
 def DCA(xA_4d, xB_4d):
@@ -202,9 +214,6 @@ def BearingMTX(x_4d, D_4d):
 
 def SocialFeatures(x, sub_batches):
     N = x.shape[0]  # x is NxTx4 tensor
-    if len(sub_batches) == 0:
-        sub_batches = [[0, N]]
-    social_features = []
 
     x_ver_repeat = x[:, -1].unsqueeze(0).repeat(N, 1, 1)
     x_hor_repeat = x[:, -1].unsqueeze(1).repeat(1, N, 1)
@@ -214,38 +223,25 @@ def SocialFeatures(x, sub_batches):
     bearings_MTX = BearingMTX(x[:, -1], Dx_mat)
     dcas_MTX = DCA_MTX(x[:, -1], Dx_mat)
     sFeatures_MTX = torch.stack([l2_dist_MTX, bearings_MTX, dcas_MTX], dim=2)
-    for sb in sub_batches:
-        if sb[1] - sb[0] == 1:
-            social_features.append([])
-            continue
-        for ii in range(sb[0], sb[1]):
-            features_i = sFeatures_MTX[ii, sb[0]:sb[1]]
-            if ii == sb[0]:
-                social_features.append(features_i[1:])
-            elif ii == sb[1]-1:
-                social_features.append(features_i[:-1])
-            else:
-                social_features.append(torch.cat([features_i[:ii-sb[0]], features_i[ii-sb[0]+1:]]))
 
-    return social_features
+    return sFeatures_MTX   # directly return the Social Features Matrix
 
     ## ===== Old implementation =====
+    # if len(sub_batches) == 0:
+    #     sub_batches = [[0, N]]
+    # social_features = []
     # for sb in sub_batches:
     #     if sb[1] - sb[0] == 1:
     #         social_features.append([])
     #         continue
     #     for ii in range(sb[0], sb[1]):
-    #         xi = x[ii, -1]
-    #         features_i = []
-    #         for jj in range(sb[0], sb[1]):
-    #             if ii == jj: continue
-    #             xj = x[jj, -1]
-    #             distance = (xi - xj).norm()
-    #             bearing = Bearing(xi, xj)
-    #             dca = DCA(xi, xj)
-    #             feature_list = [distance, bearing, dca]
-    #             features_i.append(torch.stack(feature_list))
-    #         social_features.append(features_i)
+    #         features_i = sFeatures_MTX[ii, sb[0]:sb[1]]
+    #         if ii == sb[0]:
+    #             social_features.append(features_i[1:])
+    #         elif ii == sb[1]-1:
+    #             social_features.append(features_i[:-1])
+    #         else:
+    #             social_features.append(torch.cat([features_i[:ii-sb[0]], features_i[ii-sb[0]+1:]]))
     #
     # return social_features
 
@@ -467,14 +463,16 @@ def train():
             sub_batches = sub_batches - sub_batches[0][0]
             # May have to fill with 0
             filling_len = batch_size - int(batch_size_accum)
-            obsv = torch.cat((obsv, torch.zeros(filling_len, n_past, 2).cuda()), dim=0)
-            pred = torch.cat((pred, torch.zeros(filling_len, n_next, 2).cuda()), dim=0)
+            #obsv = torch.cat((obsv, torch.zeros(filling_len, n_past, 2).cuda()), dim=0)
+            #pred = torch.cat((pred, torch.zeros(filling_len, n_next, 2).cuda()), dim=0)
+
+            bs = batch_size_accum
 
             # Completes the positional vectors with velocities (to have dimension 4)
             obsv_4d, pred_4d = get_traj_4d(obsv, pred)
-            zeros = Variable(torch.zeros(batch_size, 1) + np.random.uniform(0, 0.1), requires_grad=False).cuda()
-            ones = Variable(torch.ones(batch_size, 1) * np.random.uniform(0.9, 1.0), requires_grad=False).cuda()
-            noise = torch.FloatTensor(torch.rand(batch_size, noise_len)).cuda()
+            zeros = Variable(torch.zeros(bs, 1) + np.random.uniform(0, 0.1), requires_grad=False).cuda()
+            ones = Variable(torch.ones(bs, 1) * np.random.uniform(0.9, 1.0), requires_grad=False).cuda()
+            noise = torch.FloatTensor(torch.rand(bs, noise_len)).cuda()
 
             # ============== Train Discriminator ================
             for u in range(n_unrolling_steps + 1):
