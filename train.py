@@ -14,10 +14,10 @@ from torch.utils.data import DataLoader
 from utils.linear_models import predict_cv
 
 # ========== set input/output files ============
-dataset_name = 'eth'  # FIXME: Notice to select the proper dataset
+dataset_name = 'hotel'  # FIXME: Notice to select the proper dataset
 model_name = 'socialWays'
-input_file = '../eth-8-12.npz'
-model_file = 'trained_models/' + model_name + '-' + dataset_name + '.pt'
+input_file = '../hotel-8-12.npz'
+model_file = '../trained_models/' + model_name + '-' + dataset_name + '.pt'
 
 # FIXME: ====== training hyper-parameters ======
 # Unrolled GAN
@@ -406,6 +406,8 @@ def predict(obsv_p, noise, n_next, sub_batches=[]):
     # Apply the encoder to the observed sequence
     # obsv_4d: batch_sizexTx4 tensor
     encoder(obsv_4d)
+    if len(sub_batches) == 0:
+        sub_batches = [[0, obsv_p.size(0)]]
 
     if use_social:
         features = SocialFeatures(obsv_4d, sub_batches)
@@ -420,7 +422,7 @@ def predict(obsv_p, noise, n_next, sub_batches=[]):
     for ii in range(n_next):
         # Takes the current output of the encoder to feed the decoder
         # Gets the ouputs as a displacement/velocity
-        new_v = decoder(encoder.lstm_h[0].view(bs, -1), weighted_features, noise).view(bs, 2)
+        new_v = decoder(encoder.lstm_h[0].view(bs, -1), weighted_features.view(bs, -1), noise).view(bs, 2)
         # Deduces the predicted position
         new_p = new_v + last_obsv[:, :2]
         # The last prediction done will be new_p,new_v
