@@ -1,6 +1,8 @@
 import csv
 import math
 import sys
+from builtins import ValueError
+
 import numpy as np
 import os
 # from pandas import DataFrame, concat
@@ -230,15 +232,13 @@ class BIWIParser:
     def __init__(self):
         self.scale = Scale()
         self.all_ids = list()
-        self.actual_fps = 0.
         self.delimit = ' '
         self.p_data = []
         self.v_data = []
         self.t_data = []
         self.min_t = int(sys.maxsize)
         self.max_t = -1
-        self.interval = 6
-
+        self.interval = -1
 
     def load(self, filename, down_sample=1):
         pos_data_dict = dict()
@@ -260,8 +260,9 @@ class BIWIParser:
         else:
             file_names.append(filename)
 
-        self.actual_fps = 2.5
         for file in file_names:
+            if not os.path.exists(file):
+                raise ValueError("No such file or directory:", file)
             with open(file, 'r') as data_file:
                 content = data_file.readlines()
                 id_list = list()
@@ -293,6 +294,13 @@ class BIWIParser:
                     vel_data_dict[id].append(np.array([vx, vy]))
                     time_data_dict[id] = np.hstack((time_data_dict[id], np.array([ts])))
             self.all_ids += id_list
+
+        for ped_id, ped_T in time_data_dict.items():
+            if len(ped_T) > 1:
+                interval = int(round(ped_T[1] - ped_T[0]))
+                if interval > 0:
+                    self.interval = interval
+                    break
 
         for key, value in pos_data_dict.items():
             poss_i = np.array(value)

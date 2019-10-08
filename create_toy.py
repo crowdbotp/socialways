@@ -93,7 +93,7 @@ class ToyAnimation:
         self.samples = samples
 
         self.FPS = 15
-        self.DURATION = 10
+        self.DURATION = 15
         self.anim = animation.FuncAnimation(self.fig, self.animate, init_func=self.init,
                                             frames=self.FPS * self.DURATION, interval=5, blit=False)
 
@@ -142,13 +142,14 @@ class ToyAnimation:
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()
+    np.random.seed(30)
 
     # parser.add_argument('-v')
     parser.add_argument('--txt', type=str)
     parser.add_argument('--npz', type=str)
-    parser.add_argument('--n_conditions', default=8, type=int)
+    parser.add_argument('--n_conditions', default=6, type=int)
     parser.add_argument('--n_modes', default=3, type=int)
-    parser.add_argument('--n_samples', default=3*8*32, type=int)
+    parser.add_argument('--n_samples', default=3*6*32, type=int)
     parser.add_argument('--anim', action="store_true")
     args = parser.parse_args()
 
