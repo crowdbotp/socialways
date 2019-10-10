@@ -132,15 +132,6 @@ class AttentionPooling(nn.Module):
                 sigma_i = torch.bmm(fi.unsqueeze(1), Wh[sb[0]:sb[1]]. unsqueeze(2))
                 sigma_i[ii-sb[0]] = -1000
 
-                ## ====== Old implementation =========
-                # sigma_i = torch.ones((N), dtype=h.dtype, device=h.device) * (-1000)
-                # k_counter = -1
-                # for kk in range(sb[0], sb[1]):
-                #     if ii == kk: continue
-                #     k_counter += 1
-                #     fik = f[ii][k_counter]
-                #     sigma_i[kk - sb[0]] = torch.dot(fik.squeeze(), Wh[kk].squeeze()) * (N - 1) / np.sqrt(self.f_dim)
-
                 attentions = torch.softmax(sigma_i.squeeze(), dim=0)
                 S[ii] = torch.mm(attentions.view(1, N), h[sb[0]:sb[1]])
 
@@ -159,20 +150,6 @@ class EmbedSocialFeatures(nn.Module):
     def forward(self, ftr_list, sub_batches):
         embedded_features = self.fc(ftr_list)
         return embedded_features
-
-        ##  ====== Old implementation ======
-        # embedded_features = []
-        # for ftrs in ftr_list:
-        #     emb_i = []
-        #
-        #     if len(ftrs) > 0:
-        #         h = self.fc(ftrs)
-        #     for kk in range(len(ftrs)):
-        #         emb_i.append(h[kk])
-        #
-        #     embedded_features.append(emb_i)
-        #
-        # return embedded_features
 
 
 def DCA(xA_4d, xB_4d):
@@ -225,25 +202,6 @@ def SocialFeatures(x, sub_batches):
     sFeatures_MTX = torch.stack([l2_dist_MTX, bearings_MTX, dcas_MTX], dim=2)
 
     return sFeatures_MTX   # directly return the Social Features Matrix
-
-    ## ===== Old implementation =====
-    # if len(sub_batches) == 0:
-    #     sub_batches = [[0, N]]
-    # social_features = []
-    # for sb in sub_batches:
-    #     if sb[1] - sb[0] == 1:
-    #         social_features.append([])
-    #         continue
-    #     for ii in range(sb[0], sb[1]):
-    #         features_i = sFeatures_MTX[ii, sb[0]:sb[1]]
-    #         if ii == sb[0]:
-    #             social_features.append(features_i[1:])
-    #         elif ii == sb[1]-1:
-    #             social_features.append(features_i[:-1])
-    #         else:
-    #             social_features.append(torch.cat([features_i[:ii-sb[0]], features_i[ii-sb[0]+1:]]))
-    #
-    # return social_features
 
 
 # LSTM path encoding module
@@ -381,7 +339,8 @@ decoder = DecoderFC(hidden_size + social_feature_size + noise_len).cuda()
 # decoder = DecoderLstm(social_feature_size + VEL_VEC_LEN + noise_len, traj_code_len).cuda()
 
 # The Generator parameters and their optimizer
-predictor_params = chain(attention.parameters(), encoder.parameters(), decoder.parameters())
+predictor_params = chain(attention.parameters(), feature_embedder.parameters(),
+                         encoder.parameters(), decoder.parameters())
 predictor_optimizer = opt.Adam(predictor_params, lr=lr_g, betas=(0.9, 0.999))
 
 # The Discriminator parameters and their optimizer
