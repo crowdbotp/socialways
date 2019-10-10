@@ -587,9 +587,11 @@ if os.path.isfile(model_file):
     print('Loading model from ' + model_file)
     checkpoint = torch.load(model_file)
     start_epoch = checkpoint['epoch'] + 1
+
     attention.load_state_dict(checkpoint['attentioner_dict'])
-    encoder.load_state_dict(checkpoint['lstm_encoder_dict'])
-    decoder.load_state_dict(checkpoint['predictor_dict'])
+    feature_embedder.load_state_dict(checkpoint['feature_embedder_dict'])
+    encoder.load_state_dict(checkpoint['encoder_dict'])
+    decoder.load_state_dict(checkpoint['decoder_dict'])
     predictor_optimizer.load_state_dict(checkpoint['pred_optimizer'])
 
     D.load_state_dict(checkpoint['D_dict'])
@@ -615,8 +617,9 @@ for epoch in trange(start_epoch, n_epochs + 1):  # FIXME : set the number of epo
         torch.save({
             'epoch': epoch,
             'attentioner_dict': attention.state_dict(),
-            'lstm_encoder_dict': encoder.state_dict(),
-            'predictor_dict': decoder.state_dict(),
+            'feature_embedder_dict': feature_embedder.state_dict(),
+            'encoder_dict': encoder.state_dict(),
+            'decoder_dict': decoder.state_dict(),
             'pred_optimizer': predictor_optimizer.state_dict(),
 
             'D_dict': D.state_dict(),
