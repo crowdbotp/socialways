@@ -23,26 +23,26 @@ def create_samples(n_samples, n_conditions, n_modes, n_per_batch=2):
 
         # The first two points are located on the same radial line centered
         # on the origin.
-        x0 = np.cos(data_angle) * 8
-        y0 = np.sin(data_angle) * 8
-        x1 = np.cos(data_angle) * 6
-        y1 = np.sin(data_angle) * 6
+        x0 = np.cos(data_angle) * 4
+        y0 = np.sin(data_angle) * 4
+        x1 = np.cos(data_angle) * 3
+        y1 = np.sin(data_angle) * 3
 
         # Level of rotation is given by the mode index ((ii % n_modes)).
         # The modes are centered around 0
-        fixed_turn = ((ii % n_modes) - n_modes//2) * 20 * np.pi / 180
+        fixed_turn = ((ii % n_modes) - n_modes//2) * 16 * np.pi / 180
 
-        # Third point: located on a circle of radius 4
+        # Third point: located on a circle of radius 2
         # Normal-distributed angle deviation are introduced as p2_turn_rand
-        p2_turn_rand = np.random.randn(1) * 1.5 * np.pi / 180
-        x2 = np.cos(data_angle + fixed_turn + p2_turn_rand) * 4
-        y2 = np.sin(data_angle + fixed_turn + p2_turn_rand) * 4
+        p2_turn_rand = (np.random.rand(1) - 0.5) * 4 * np.pi / 180
+        x2 = np.cos(data_angle + fixed_turn + p2_turn_rand) * 2
+        y2 = np.sin(data_angle + fixed_turn + p2_turn_rand) * 2
 
-        # Fourth point: located on a circle of radius 2
+        # Fourth point: located on a circle of radius 1
         # Normal-distributed angle deviation are introduced as p3_turn_rand
-        p3_turn_rand = np.random.randn(1) * 2.5 * np.pi / 180
-        x3 = np.cos(data_angle + fixed_turn + p2_turn_rand + p3_turn_rand) * 2
-        y3 = np.sin(data_angle + fixed_turn + p2_turn_rand + p3_turn_rand) * 2
+        p3_turn_rand = (np.random.rand(1) - 0.5) * 6 * np.pi / 180
+        x3 = np.cos(data_angle + fixed_turn + p2_turn_rand + p3_turn_rand)
+        y3 = np.sin(data_angle + fixed_turn + p2_turn_rand + p3_turn_rand)
 
         # Add the path
         samples.append(np.array([[x0, y0], [x1, y1], [x2, y2], [x3, y3]]))
@@ -50,7 +50,7 @@ def create_samples(n_samples, n_conditions, n_modes, n_per_batch=2):
         time_stamps.append(np.array([t0*4, t0*4+1, t0*4+2, t0*4+3]))
 
     # Scale down the paths
-    samples = np.array(samples) / 8
+    samples = np.array(samples) / 4
     return samples, time_stamps
 
 
@@ -149,7 +149,7 @@ if __name__ == '__main__':
     parser.add_argument('--npz', type=str)
     parser.add_argument('--n_conditions', default=6, type=int)
     parser.add_argument('--n_modes', default=3, type=int)
-    parser.add_argument('--n_samples', default=3*6*32, type=int)
+    parser.add_argument('--n_samples', default=3*6*12, type=int)
     parser.add_argument('--anim', action="store_true")
     args = parser.parse_args()
 
