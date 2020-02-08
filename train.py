@@ -528,8 +528,7 @@ def test(n_gen_samples=20, linear=False, write_to_file=None, just_one=False):
     plt.close()
     ade_avg_12, fde_avg_12 = 0, 0
     ade_min_12, fde_min_12 = 0, 0
-    for ii, batch_i in enumerate(test_batches):
-        if ii > 20: break
+    for ii, batch_i in enumerate(test_batches):        
         obsv = dataset_obsv[batch_i[0]:batch_i[1]]
         pred = dataset_pred[batch_i[0]:batch_i[1]]
         current_t = dataset_t[batch_i[0]]
