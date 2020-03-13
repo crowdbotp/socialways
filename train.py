@@ -1,5 +1,6 @@
 import os
 import time
+import argparse
 import matplotlib.pyplot as plt
 import copy
 import torch
@@ -13,15 +14,51 @@ from utils.parse_utils import Scale
 from torch.utils.data import DataLoader
 from utils.linear_models import predict_cv
 
+
+# Parser arguments
+parser = argparse.ArgumentParser(description='Social Ways trajectory prediction.')
+parser.add_argument('--batch-size', '--b',
+                    type=int, default=256, metavar='N',
+                    help='input batch size for training (default: 256)')
+parser.add_argument('--epochs', '--e',
+                    type=int, default=1000, metavar='N',
+                    help='number of epochs to train (default: 1000)')
+parser.add_argument('--model', '--m',
+                    default='socialWays',
+                    choices=['socialWays'],
+                    help='pick a specific network to train'
+                         '(default: "socialWays")')
+parser.add_argument('--latent-dim', '--ld',
+                    type=int, default=10, metavar='N',
+                    help='dimension of latent space (default: 10)')
+parser.add_argument('--d-learning-rate', '--d-lr',
+                    type=float, default=1E-3, metavar='N',
+                    help='learning rate of discriminator (default: 1E-3)')
+parser.add_argument('--g-learning-rate', '--g-lr',
+                    type=float, default=1E-4, metavar='N',
+                    help='learning rate of generator (default: 1E-4)')
+parser.add_argument('--unrolling-steps', '--unroll',
+                    type=int, default=1, metavar='N',
+                    help='number of steps to unroll gan (default: 1)')
+parser.add_argument('--hidden-size', '--h-size',
+                    type=int, default=64, metavar='N',
+                    help='size of network intermediate layer (default: 64)')
+parser.add_argument('--dataset', '--data',
+                    default='hotel',
+                    choices=['hotel'],
+                    help='pick a specific dataset (default: "hotel")')
+args = parser.parse_args()
+
+
 # ========== set input/output files ============
-dataset_name = 'hotel'  # FIXME: Notice to select the proper dataset
-model_name = 'socialWays'
+dataset_name = args.dataset
+model_name = args.model
 input_file = '../hotel-8-12.npz'
 model_file = '../trained_models/' + model_name + '-' + dataset_name + '.pt'
 
 # FIXME: ====== training hyper-parameters ======
 # Unrolled GAN
-n_unrolling_steps = 0
+n_unrolling_steps = args.unrolling_steps
 # Info GAN
 use_info_loss = True
 loss_info_w = 0.5
@@ -31,17 +68,17 @@ use_l2_loss = False
 use_variety_loss = False
 loss_l2_w = 0.5  # WARNING for both l2 and variety
 # Learning Rate
-lr_g = 1E-3
-lr_d = 1E-4
+lr_g = args.g_learning_rate
+lr_d = args.d_learning_rate
 # FIXME: ====== Network Size ===================
 # Batch size
-batch_size = 256
+batch_size = args.batch_size
 # LSTM hidden size
-hidden_size = 64
-n_epochs = 100000
+hidden_size = args.hidden_size
+n_epochs = args.epochs
 num_social_features = 3
-social_feature_size = hidden_size
-noise_len = hidden_size // 2
+social_feature_size = args.hidden_size
+noise_len = args.hidden_size // 2
 n_lstm_layers = 1
 use_social = False
 # ==============================================
