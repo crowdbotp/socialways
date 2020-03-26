@@ -75,7 +75,6 @@ lr_d = args.d_learning_rate
 batch_size = args.batch_size
 # LSTM hidden size
 hidden_size = args.hidden_size
-n_epochs = args.epochs
 num_social_features = 3
 social_feature_size = args.hidden_size
 noise_len = args.hidden_size // 2
@@ -131,7 +130,10 @@ def get_traj_4d(obsv_p, pred_p):
     obsv_v = obsv_p[:, 1:] - obsv_p[:, :-1]
     obsv_v = torch.cat([obsv_v[:, 0].unsqueeze(1), obsv_v], dim=1)
     obsv_4d = torch.cat([obsv_p, obsv_v], dim=2)
-    if len(pred_p) == 0: return obsv_4d
+
+    if len(pred_p) == 0:
+        return obsv_4d
+
     pred_p_1 = torch.cat([obsv_p[:, -1].unsqueeze(1), pred_p[:, :-1]], dim=1)
     pred_v = pred_p - pred_p_1
     pred_4d = torch.cat([pred_p, pred_v], dim=2)
@@ -386,7 +388,8 @@ D_optimizer = opt.Adam(D.parameters(), lr=lr_d, betas=(0.9, 0.999))
 mse_loss = nn.MSELoss()
 bce_loss = nn.BCELoss()
 
-print('hidden dim = %d | lr(G) =  %.5f | lr(D) =  %.5f' % (hidden_size, lr_g, lr_d))
+print('hidden dim = %d | lr(G) =  %.5f | lr(D) =  %.5f' % (hidden_size,
+                                                           lr_g, lr_d))
 
 
 def predict(obsv_p, noise, n_next, sub_batches=[]):
@@ -408,7 +411,9 @@ def predict(obsv_p, noise, n_next, sub_batches=[]):
     if use_social:
         features = SocialFeatures(obsv_4d, sub_batches)
         emb_features = feature_embedder(features, sub_batches)
-        weighted_features = attention(emb_features, encoder.lstm_h[0].squeeze(), sub_batches)
+        weighted_features = attention(emb_features,
+                                      encoder.lstm_h[0].squeeze(),
+                                      sub_batches)
     else:
         weighted_features = torch.zeros_like(encoder.lstm_h[0].squeeze())
 
@@ -440,7 +445,7 @@ def train():
     tic = time.clock()
     # Evaluation metrics (ADE/FDE)
     train_ADE, train_FDE = 0, 0
-    batch_size_accum = 0;
+    batch_size_accum = 0
     sub_batches = []
     # For all the training batches
     for ii, batch_i in enumerate(train_batches):
@@ -617,53 +622,59 @@ def test(n_gen_samples=20, linear=False, write_to_file=None, just_one=False):
           % (ade_avg_12, fde_avg_12, ade_min_12, fde_min_12))
 
 
-# =======================================================
-# ===================== M A I N =========================
-# =======================================================
-if os.path.isfile(model_file):
-    print('Loading model from ' + model_file)
-    checkpoint = torch.load(model_file)
-    start_epoch = checkpoint['epoch'] + 1
+def main():
+    # =======================================================
+    # ===================== M A I N =========================
+    # =======================================================
+    if os.path.isfile(model_file):
+        print('Loading model from ' + model_file)
+        checkpoint = torch.load(model_file)
+        start_epoch = checkpoint['epoch'] + 1
 
-    attention.load_state_dict(checkpoint['attentioner_dict'])
-    feature_embedder.load_state_dict(checkpoint['feature_embedder_dict'])
-    encoder.load_state_dict(checkpoint['encoder_dict'])
-    decoder.load_state_dict(checkpoint['decoder_dict'])
-    predictor_optimizer.load_state_dict(checkpoint['pred_optimizer'])
+        attention.load_state_dict(checkpoint['attentioner_dict'])
+        feature_embedder.load_state_dict(checkpoint['feature_embedder_dict'])
+        encoder.load_state_dict(checkpoint['encoder_dict'])
+        decoder.load_state_dict(checkpoint['decoder_dict'])
+        predictor_optimizer.load_state_dict(checkpoint['pred_optimizer'])
 
-    D.load_state_dict(checkpoint['D_dict'])
-    D_optimizer.load_state_dict(checkpoint['D_optimizer'])
-else:
-    min_train_ADE = 10000
-    start_epoch = 1
+        D.load_state_dict(checkpoint['D_dict'])
+        D_optimizer.load_state_dict(checkpoint['D_optimizer'])
+    else:
+        min_train_ADE = 10000
+        start_epoch = 1
 
-# FIXME: comment here to train
-# wr_dir = '../preds-iccv/' + dataset_name + '/' + model_name + '/' + str(0000)
-# os.makedirs(wr_dir, exist_ok=True)
-# test(n_gen_samples=128, write_to_file=wr_dir)
-# exit(1)
+    # FIXME: comment here to train
+    # wr_dir = '../preds-iccv/' + dataset_name + '/' + model_name + '/' + str(0000)
+    # os.makedirs(wr_dir, exist_ok=True)
+    # test(n_gen_samples=128, write_to_file=wr_dir)
+    # exit(1)
 
-# ===================== TRAIN =========================
-for epoch in trange(start_epoch, n_epochs + 1):  # FIXME : set the number of epochs
-    # Main training function
-    train()
+    # ===================== TRAIN =========================
+    for epoch in trange(start_epoch, args.epochs + 1):
+        # Main training function
+        train()
 
-    # ============== Save model on disk ===============
-    if epoch % 50 == 0:  # FIXME : set the interval for running tests
-        print('Saving model to file ...', model_file)
-        torch.save({
-            'epoch': epoch,
-            'attentioner_dict': attention.state_dict(),
-            'feature_embedder_dict': feature_embedder.state_dict(),
-            'encoder_dict': encoder.state_dict(),
-            'decoder_dict': decoder.state_dict(),
-            'pred_optimizer': predictor_optimizer.state_dict(),
+        # ============== Save model on disk ===============
+        if epoch % 50 == 0:  # FIXME : set the interval for running tests
+            print('Saving model to file ...', model_file)
+            torch.save({
+                'epoch': epoch,
+                'attentioner_dict': attention.state_dict(),
+                'feature_embedder_dict': feature_embedder.state_dict(),
+                'encoder_dict': encoder.state_dict(),
+                'decoder_dict': decoder.state_dict(),
+                'pred_optimizer': predictor_optimizer.state_dict(),
 
-            'D_dict': D.state_dict(),
-            'D_optimizer': D_optimizer.state_dict()
-        }, model_file)
+                'D_dict': D.state_dict(),
+                'D_optimizer': D_optimizer.state_dict()
+            }, model_file)
 
-    if epoch % 5 == 0:
-        wr_dir = '../medium/' + dataset_name + '/' + model_name + '/' + str(epoch)
-        os.makedirs(wr_dir, exist_ok=True)
-        test(128, write_to_file=wr_dir, just_one=True)
+        if epoch % 5 == 0:
+            wr_dir = '../medium/' + dataset_name + '/' \
+                     + model_name + '/' + str(epoch)
+            os.makedirs(wr_dir, exist_ok=True)
+            test(128, write_to_file=wr_dir, just_one=True)
+
+
+if __name__ == "__main__":
+    main()
