@@ -59,8 +59,6 @@ input_file = '../hotel-8-12.npz'
 model_file = '../trained_models/' + model_name + '-' + dataset_name + '.pt'
 
 # FIXME: ====== training hyper-parameters ======
-# Unrolled GAN
-n_unrolling_steps = args.unrolling_steps
 # Info GAN
 use_info_loss = True
 loss_info_w = 0.5
@@ -237,7 +235,7 @@ def train(epoch):
             noise = torch.FloatTensor(torch.rand(bs, noise_len)).cuda()
 
             # ============== Train Discriminator ================
-            for u in range(n_unrolling_steps + 1):
+            for u in range(args.unrolling_steps + 1):
                 # Zero the gradient buffers of all parameters
                 D.zero_grad()
                 with torch.no_grad():
@@ -259,7 +257,7 @@ def train(epoch):
                 d_loss.backward()  # update D
                 D_optimizer.step()
 
-                if u == 0 and n_unrolling_steps > 0:
+                if u == 0 and args.unrolling_steps > 0:
                     backup = copy.deepcopy(D)
 
             # =============== Train Generator ================= #
@@ -302,7 +300,7 @@ def train(epoch):
             g_loss.backward()
             predictor_optimizer.step()
 
-            if n_unrolling_steps > 0:
+            if args.unrolling_steps > 0:
                 D.load(backup)
                 del backup
 
@@ -314,13 +312,13 @@ def train(epoch):
                 train_ADE += e
                 train_FDE += err_all[:, -1].sum().item()
 
-            batch_size_accum = 0;
+            batch_size_accum = 0
             sub_batches = []
 
     train_ADE /= n_train_samples
     train_FDE /= n_train_samples
     toc = time.clock()
-    print(" Epc=%4d, Train ADE,FDE = (%.3f, %.3f) | time = %.1f" \
+    print(" Epc=%4d, Train ADE,FDE = (%.3f, %.3f) | time = %.1f"
           % (epoch, train_ADE, train_FDE, toc - tic))
 
 
