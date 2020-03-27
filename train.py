@@ -441,7 +441,7 @@ def predict(obsv_p, noise, n_next, sub_batches=[]):
 
 
 # =============== Training Loop ==================
-def train():
+def train(epoch):
     tic = time.clock()
     # Evaluation metrics (ADE/FDE)
     train_ADE, train_FDE = 0, 0
@@ -652,7 +652,7 @@ def main():
     # ===================== TRAIN =========================
     for epoch in trange(start_epoch, args.epochs + 1):
         # Main training function
-        train()
+        train(epoch)
 
         # ============== Save model on disk ===============
         if epoch % 50 == 0:  # FIXME : set the interval for running tests
