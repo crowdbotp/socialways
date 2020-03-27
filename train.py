@@ -342,7 +342,8 @@ class DecoderLstm(nn.Module):
     def __init__(self, input_size, hidden_size):
         super(DecoderLstm, self).__init__()
         # Decoding LSTM
-        self.lstm = torch.nn.LSTM(input_size, hidden_size, num_layers=1, batch_first=True)
+        self.lstm = torch.nn.LSTM(input_size, hidden_size,
+                                  num_layers=1, batch_first=True)
         # Fully connected sub-network. Input is hidden_size, output is 2.
         self.fc = nn.Sequential(torch.nn.Linear(hidden_size, 64), nn.Sigmoid(),
                                 torch.nn.Linear(64, 64), nn.LeakyReLU(0.2),
@@ -423,7 +424,8 @@ def predict(obsv_p, noise, n_next, sub_batches=[]):
     for ii in range(n_next):
         # Takes the current output of the encoder to feed the decoder
         # Gets the ouputs as a displacement/velocity
-        new_v = decoder(encoder.lstm_h[0].view(bs, -1), weighted_features.view(bs, -1), noise).view(bs, 2)
+        new_v = decoder(encoder.lstm_h[0].view(bs, -1),
+                        weighted_features.view(bs, -1), noise).view(bs, 2)
         # Deduces the predicted position
         new_p = new_v + last_obsv[:, :2]
         # The last prediction done will be new_p,new_v
